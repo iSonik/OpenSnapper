@@ -3,6 +3,7 @@ import Foundation
 enum AppStrings {
     enum App {
         static let name = "OpenSnapper"
+        static let hideToMenuBar = "Hide to Menu Bar"
     }
 
     enum Controls {

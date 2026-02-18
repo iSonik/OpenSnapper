@@ -16,6 +16,13 @@ struct OpenSnapperApp: App {
         }
         .windowStyle(.titleBar)
         .commands {
+            CommandGroup(replacing: .appTermination) {
+                Button(AppStrings.App.hideToMenuBar) {
+                    editor.hideToMenuBar()
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
+
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo") {
                     editor.undoLastChange()

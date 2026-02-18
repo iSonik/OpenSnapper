@@ -2,6 +2,14 @@ import AppKit
 import Foundation
 
 extension EditorState {
+    func hideToMenuBar() {
+        for window in NSApp.windows {
+            window.orderOut(nil)
+        }
+        NSApp.setActivationPolicy(.accessory)
+        setStatus(AppStrings.Messages.runningInBackground)
+    }
+
     func openSettingsWindow() {
         NSApp.activate(ignoringOtherApps: true)
         let opened = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
