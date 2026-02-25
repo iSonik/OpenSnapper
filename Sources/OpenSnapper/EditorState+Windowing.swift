@@ -11,6 +11,7 @@ extension EditorState {
     }
 
     func openSettingsWindow() {
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         let opened = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         if !opened {
@@ -38,6 +39,7 @@ extension EditorState {
     }
 
     func bringMainWindowToFront() {
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.unhide(nil)
 

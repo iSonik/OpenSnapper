@@ -48,7 +48,7 @@ extension EditorState {
         return candidate
     }
 
-    func exportPNG() {
+    func exportPNG(forcePromptForLocation: Bool = false) {
         guard let rendered = renderedImage() else {
             setStatus(AppStrings.Messages.nothingToSave, isError: true)
             return
@@ -77,7 +77,8 @@ extension EditorState {
         }
 
         let outputURL: URL
-        if !askForSaveLocationEachTime {
+        let shouldPromptForLocation = forcePromptForLocation || askForSaveLocationEachTime
+        if !shouldPromptForLocation {
             guard let folderURL = defaultSaveFolderURL else {
                 setStatus(AppStrings.Messages.setDefaultFolderOrAsk, isError: true)
                 return
@@ -119,10 +120,11 @@ extension EditorState {
         }
     }
 
-    func copyEditedImageToClipboard() {
+    @discardableResult
+    func copyEditedImageToClipboard() -> Bool {
         guard let rendered = renderedImage() else {
             setStatus(AppStrings.Messages.nothingToCopy, isError: true)
-            return
+            return false
         }
 
         NSPasteboard.general.clearContents()
@@ -131,14 +133,19 @@ extension EditorState {
             copyFeedbackID = UUID()
         }
         setStatus(wrote ? AppStrings.Messages.copiedImageToClipboard : AppStrings.Messages.copyFailed, isError: !wrote)
+        return wrote
     }
 
-    func copySelectionOrImage() {
+    func copySelectionOrImage(triggeredByKeyboardShortcut: Bool = false) {
         let handledByResponder = NSApp.sendAction(Selector(("copy:")), to: nil, from: nil)
         if handledByResponder {
             return
         }
-        copyEditedImageToClipboard()
+
+        let didCopy = copyEditedImageToClipboard()
+        if didCopy, triggeredByKeyboardShortcut, closeAppOnCopyShortcut {
+            hideToMenuBar()
+        }
     }
 
     func copyRecentScreenshotToClipboard(_ id: UUID) {

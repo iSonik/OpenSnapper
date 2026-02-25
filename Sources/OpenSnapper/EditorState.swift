@@ -59,6 +59,9 @@ final class EditorState: ObservableObject {
     @Published var askForSaveLocationEachTime: Bool = true {
         didSet { persistPreferences() }
     }
+    @Published var closeAppOnCopyShortcut: Bool = false {
+        didSet { persistPreferences() }
+    }
     @Published var captureHotkey: String = "cmd+shift+2" {
         didSet {
             persistPreferences()
@@ -85,6 +88,11 @@ final class EditorState: ObservableObject {
         }
     }
     @Published var annotationTool: AnnotationTool = .none
+    @Published var annotationStylePreset: AnnotationStylePreset = .callout
+    @Published var annotationCustomColor: Color = Color(red: 0.11, green: 0.61, blue: 0.97)
+    @Published var annotationTextDraft: String = "Text"
+    @Published var editingTextAnnotationID: UUID?
+    @Published var selectedAnnotationID: UUID?
     @Published var annotations: [Annotation] = []
     @Published var redactionRegions: [SensitiveRegion] = []
     @Published var draftAnnotationStart: CGPoint?

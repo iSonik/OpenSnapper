@@ -4,24 +4,99 @@ import Foundation
 import SwiftUI
 
 extension EditorState {
-    enum AnnotationTool: String, CaseIterable, Identifiable {
+    enum AnnotationTool: String, CaseIterable, Identifiable, Hashable {
         case none
         case box
         case arrow
+        case text
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .none: "Mouse"
+            case .box: "Box"
+            case .arrow: "Arrow"
+            case .text: "Text"
+            }
+        }
+    }
+
+    enum AnnotationStylePreset: String, CaseIterable, Identifiable, Hashable {
+        case callout
+        case subtle
+        case warning
+        case custom
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .callout: "Callout"
+            case .subtle: "Subtle"
+            case .warning: "Warning"
+            case .custom: "Custom"
+            }
+        }
+    }
+
+    enum AnnotationBoxCorner: CaseIterable, Hashable {
+        case topLeft
+        case topRight
+        case bottomLeft
+        case bottomRight
+    }
+
+    enum AnnotationTextHandleSide: Hashable {
+        case left
+        case right
+        case top
+        case bottom
+    }
+
+    enum AnnotationHitTarget: Hashable {
+        case body(UUID)
+        case boxCorner(UUID, AnnotationBoxCorner)
+        case arrowStart(UUID)
+        case arrowEnd(UUID)
+        case textHandle(UUID, AnnotationTextHandleSide)
+
+        var annotationID: UUID {
+            switch self {
+            case .body(let id),
+                .arrowStart(let id),
+                .arrowEnd(let id),
+                .textHandle(let id, _):
+                return id
+            case .boxCorner(let id, _):
+                return id
+            }
+        }
     }
 
     struct Annotation: Identifiable, Equatable {
         enum Kind: Equatable {
             case box
             case arrow
+            case text
+
+            var title: String {
+                switch self {
+                case .box: "Box"
+                case .arrow: "Arrow"
+                case .text: "Text"
+                }
+            }
         }
 
         let id: UUID
         let kind: Kind
+        let stylePreset: AnnotationStylePreset
         let start: CGPoint
         let end: CGPoint
+        let text: String?
+        let textBoxWidth: CGFloat?
+        let textBoxHeight: CGFloat?
     }
 
     struct SensitiveRegion: Identifiable, Equatable {

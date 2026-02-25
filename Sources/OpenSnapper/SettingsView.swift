@@ -57,6 +57,7 @@ struct SettingsView: View {
                 }
 
                 Toggle("Ask Every Time On Save", isOn: $editor.askForSaveLocationEachTime)
+                Toggle("Hide to Menu Bar After Cmd+C Copy", isOn: $editor.closeAppOnCopyShortcut)
             }
 
             Section("Global Hotkeys") {

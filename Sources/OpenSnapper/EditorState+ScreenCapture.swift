@@ -79,10 +79,13 @@ extension EditorState {
             Task { @MainActor in
                 guard let self else { return }
                 defer { self.captureProcess = nil }
+                let hadVisibleWindowsBeforeCapture = !self.captureWindows.isEmpty
                 self.restoreWindowsAfterCapture()
 
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrOutput = String(data: stderrData, encoding: .utf8) ?? ""
+                let trimmed = stderrOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                let wasCanceled = terminatedProcess.terminationStatus != 0 && trimmed.isEmpty
 
                 if terminatedProcess.terminationStatus == 0,
                    FileManager.default.fileExists(atPath: outputURL.path)
@@ -99,6 +102,7 @@ extension EditorState {
                 }
 
                 if allowPasteboardFallback,
+                   !wasCanceled,
                    let image = NSPasteboard.general.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage
                 {
                     self.rememberRecentScreenshot(image)
@@ -113,7 +117,6 @@ extension EditorState {
                     return
                 }
 
-                let trimmed = stderrOutput.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
                     self.setStatus(canceledMessage)
                 } else {
@@ -123,7 +126,9 @@ extension EditorState {
                     ), isError: true)
                 }
                 self.cleanupCaptureTemporaryFile(at: outputURL)
-                self.bringMainWindowToFront()
+                if hadVisibleWindowsBeforeCapture {
+                    self.bringMainWindowToFront()
+                }
             }
         }
 

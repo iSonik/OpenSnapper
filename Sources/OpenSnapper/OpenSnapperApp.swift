@@ -21,6 +21,25 @@ struct OpenSnapperApp: App {
                     editor.hideToMenuBar()
                 }
                 .keyboardShortcut("q", modifiers: .command)
+
+                Button("Close (Hide to Menu Bar)") {
+                    editor.hideToMenuBar()
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+
+            CommandGroup(replacing: .saveItem) {
+                Button(AppStrings.Controls.save) {
+                    editor.exportPNG()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(!editor.hasImage)
+
+                Button(AppStrings.Controls.saveAs) {
+                    editor.exportPNG(forcePromptForLocation: true)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(!editor.hasImage)
             }
 
             CommandGroup(replacing: .undoRedo) {
@@ -33,7 +52,7 @@ struct OpenSnapperApp: App {
 
             CommandGroup(replacing: .pasteboard) {
                 Button("Copy") {
-                    editor.copySelectionOrImage()
+                    editor.copySelectionOrImage(triggeredByKeyboardShortcut: true)
                 }
                 .keyboardShortcut("c", modifiers: .command)
                 .disabled(!editor.hasImage)

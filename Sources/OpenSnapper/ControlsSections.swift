@@ -141,8 +141,79 @@ struct ControlsToolkitSection: View {
                     editor.removeSolidBackground()
                 }
                 .disabled(!editor.hasImage || editor.isRemovingBackground)
+
+                Divider()
+
+                Text(AppStrings.Controls.annotations)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.Controls.annotationTool)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(AppStrings.Controls.annotationTool, selection: annotationToolBinding) {
+                        ForEach(EditorState.AnnotationTool.allCases) { tool in
+                            Text(tool.title).tag(tool)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                .disabled(!editor.hasImage)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.Controls.annotationPreset)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(AppStrings.Controls.annotationPreset, selection: $editor.annotationStylePreset) {
+                        ForEach(EditorState.AnnotationStylePreset.allCases.filter { $0 != .custom }) { preset in
+                            Text(preset.title).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    ZStack(alignment: .trailing) {
+                        Button {
+                            editor.annotationStylePreset = .custom
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(EditorState.AnnotationStylePreset.custom.title)
+                                Spacer(minLength: 0)
+                                Circle()
+                                    .fill(editor.annotationCustomColor)
+                                    .frame(width: 20, height: 20)
+                                    .overlay(Circle().stroke(Color.white.opacity(0.75), lineWidth: 1.2))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(editor.annotationStylePreset == .custom ? .accentColor : .gray.opacity(0.45))
+
+                        ColorPicker("", selection: $editor.annotationCustomColor)
+                            .labelsHidden()
+                            .opacity(0.02)
+                            .frame(width: 28, height: 28)
+                            .padding(.trailing, 6)
+                            .help("Custom annotation color")
+                    }
+                }
+                .disabled(!editor.hasImage)
+
+                ControlsFullWidthButton(title: AppStrings.Controls.clearAnnotationsButton) {
+                    editor.clearAnnotations()
+                }
+                .disabled(editor.annotations.isEmpty)
             }
         }
+    }
+
+    private var annotationToolBinding: Binding<EditorState.AnnotationTool> {
+        Binding(
+            get: { editor.annotationTool },
+            set: { editor.setAnnotationTool($0) }
+        )
     }
 }
 

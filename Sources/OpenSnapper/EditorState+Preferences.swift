@@ -15,6 +15,7 @@ extension EditorState {
         static let filenameTemplate = "settings.filenameTemplate"
         static let exportFormat = "settings.exportFormat"
         static let askForSaveLocationEachTime = "settings.askForSaveLocationEachTime"
+        static let closeAppOnCopyShortcut = "settings.closeAppOnCopyShortcut"
         static let captureHotkey = "settings.captureHotkey"
         static let exportHotkey = "settings.exportHotkey"
         static let colorPickerHotkey = "settings.colorPickerHotkey"
@@ -41,6 +42,9 @@ extension EditorState {
         if defaults.object(forKey: DefaultsKey.askForSaveLocationEachTime) != nil {
             askForSaveLocationEachTime = defaults.bool(forKey: DefaultsKey.askForSaveLocationEachTime)
         }
+        if defaults.object(forKey: DefaultsKey.closeAppOnCopyShortcut) != nil {
+            closeAppOnCopyShortcut = defaults.bool(forKey: DefaultsKey.closeAppOnCopyShortcut)
+        }
         if let value = defaults.string(forKey: DefaultsKey.captureHotkey), !value.isEmpty {
             captureHotkey = value
         }
@@ -63,6 +67,7 @@ extension EditorState {
         defaults.set(filenameTemplate, forKey: DefaultsKey.filenameTemplate)
         defaults.set(exportFormat.rawValue, forKey: DefaultsKey.exportFormat)
         defaults.set(askForSaveLocationEachTime, forKey: DefaultsKey.askForSaveLocationEachTime)
+        defaults.set(closeAppOnCopyShortcut, forKey: DefaultsKey.closeAppOnCopyShortcut)
         defaults.set(captureHotkey, forKey: DefaultsKey.captureHotkey)
         defaults.set(exportHotkey, forKey: DefaultsKey.exportHotkey)
         defaults.set(colorPickerHotkey, forKey: DefaultsKey.colorPickerHotkey)
