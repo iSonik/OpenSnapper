@@ -21,6 +21,14 @@ extension EditorState {
             shadowRadius = LayoutDefaults.shadowRadius
             shadowOpacity = LayoutDefaults.shadowOpacity
         }
+        // Per-image overlays should not carry over to a newly loaded screenshot/image.
+        annotations.removeAll()
+        redactionRegions.removeAll()
+        draftAnnotationStart = nil
+        draftAnnotationCurrent = nil
+        selectedAnnotationID = nil
+        editingTextAnnotationID = nil
+        annotationTool = .none
         sourceImage = image
         centeringEnabled = centeringEligible
         if centeringEligible, let subjectCenter {
