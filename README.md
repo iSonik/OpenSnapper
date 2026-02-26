@@ -110,13 +110,6 @@ BUNDLE_ID=com.yourname.opensnapper ./scripts/build-app.sh
 `dist`
 - Generated app bundle output (ignored in git)
 
-## Roadmap
-
-1. More annotation tools (arrow, box, text)
-2. Smarter redaction and OCR workflows
-3. Reusable style presets and export profiles
-4. Additional capture modes and automation hooks
-
 ## Contributing
 
 See `CONTRIBUTING.md`.
