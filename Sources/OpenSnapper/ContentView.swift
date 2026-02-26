@@ -44,82 +44,125 @@ struct ContentView: View {
 
             Divider()
 
-            ZStack(alignment: .topTrailing) {
-                Color(nsColor: .underPageBackgroundColor)
-                    .ignoresSafeArea()
+            HStack(spacing: 0) {
+                canvasWorkspace
+                    .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: editor.handleDrop)
 
-                GeometryReader { geometry in
-                    let canvasRect = calculatedCanvasRect(in: geometry.size)
-                    let horizontalWidth = min(320, max(180, canvasRect.width * 0.44))
-                    let verticalLength = min(240, max(140, canvasRect.height * 0.46))
-                    let horizontalY = max(20, canvasRect.minY - 20)
-                    let verticalX = min(geometry.size.width - 14, canvasRect.maxX + 16)
+                Divider()
 
-                    ZStack(alignment: .topLeading) {
-                        CanvasView()
-                            .frame(width: canvasRect.width, height: canvasRect.height)
-                            .position(x: canvasRect.midX, y: canvasRect.midY)
+                rightInspector
+                    .frame(width: 330)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            }
+        }
+    }
 
-                        if editor.hasImage {
-                            Slider(
-                                value: horizontalPlacementBinding,
-                                in: EditorState.LayoutRanges.offset,
-                                onEditingChanged: { editing in
-                                    if editing {
-                                        editor.recordUndoCheckpoint()
-                                    }
-                                }
-                            )
-                            .frame(width: horizontalWidth)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                            .position(x: canvasRect.midX, y: horizontalY)
+    private var canvasWorkspace: some View {
+        ZStack {
+            Color(nsColor: .underPageBackgroundColor)
+                .ignoresSafeArea()
 
-                            Slider(
-                                value: verticalPlacementBinding,
-                                in: EditorState.LayoutRanges.offset,
-                                onEditingChanged: { editing in
-                                    if editing {
-                                        editor.recordUndoCheckpoint()
-                                    }
-                                }
-                            )
-                            .frame(width: verticalLength)
-                            .rotationEffect(.degrees(-90))
-                            .scaleEffect(x: 1, y: -1)
-                            .frame(width: 24, height: verticalLength)
-                            .position(x: verticalX, y: canvasRect.midY)
-                        }
+            VStack(spacing: 0) {
+                if editor.hasImage {
+                    ControlsAnnotationsTopBar()
+                        .padding(.horizontal, 18)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
+                }
 
-                        if isDropTargeted {
-                            RoundedRectangle(cornerRadius: 20)
-                                .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [10]))
+                ZStack(alignment: .topTrailing) {
+                    GeometryReader { geometry in
+                        let canvasRect = calculatedCanvasRect(in: geometry.size)
+                        let horizontalWidth = min(320, max(180, canvasRect.width * 0.44))
+                        let verticalLength = min(240, max(140, canvasRect.height * 0.46))
+                        let horizontalY = max(20, canvasRect.minY - 20)
+                        let verticalX = min(geometry.size.width - 14, canvasRect.maxX + 16)
+
+                        ZStack(alignment: .topLeading) {
+                            CanvasView()
                                 .frame(width: canvasRect.width, height: canvasRect.height)
                                 .position(x: canvasRect.midX, y: canvasRect.midY)
+
+                            if editor.hasImage {
+                                Slider(
+                                    value: horizontalPlacementBinding,
+                                    in: EditorState.LayoutRanges.offset,
+                                    onEditingChanged: { editing in
+                                        if editing {
+                                            editor.recordUndoCheckpoint()
+                                        }
+                                    }
+                                )
+                                .frame(width: horizontalWidth)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                                .position(x: canvasRect.midX, y: horizontalY)
+
+                                Slider(
+                                    value: verticalPlacementBinding,
+                                    in: EditorState.LayoutRanges.offset,
+                                    onEditingChanged: { editing in
+                                        if editing {
+                                            editor.recordUndoCheckpoint()
+                                        }
+                                    }
+                                )
+                                .frame(width: verticalLength)
+                                .rotationEffect(.degrees(-90))
+                                .scaleEffect(x: 1, y: -1)
+                                .frame(width: 24, height: verticalLength)
+                                .position(x: verticalX, y: canvasRect.midY)
+                            }
+
+                            if isDropTargeted {
+                                RoundedRectangle(cornerRadius: 20)
+                                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [10]))
+                                    .frame(width: canvasRect.width, height: canvasRect.height)
+                                    .position(x: canvasRect.midX, y: canvasRect.midY)
+                            }
                         }
                     }
                 }
 
-                Button {
-                    editor.copyEditedImageToClipboard()
-                } label: {
-                    Image(systemName: "doc.on.doc.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 32)
+                HStack {
+                    Spacer(minLength: 0)
+                    copyButton
                 }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.roundedRectangle)
-                .controlSize(.large)
-                .disabled(!editor.hasImage)
-                .foregroundStyle(copyFlash ? .green : .primary)
-                .shadow(color: copyFlash ? .green.opacity(0.45) : .clear, radius: 8)
-                .modifier(ShakeEffect(animatableData: copyShakeTrigger))
-                .padding(.top, 18)
-                .padding(.trailing, 18)
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
             }
-            .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: editor.handleDrop)
         }
+    }
+
+    private var rightInspector: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlsBackgroundSection()
+                ControlsLayoutSection()
+                Spacer(minLength: 0)
+            }
+            .padding(18)
+        }
+        .groupBoxStyle(ControlsGlassGroupBoxStyle())
+    }
+
+    private var copyButton: some View {
+        Button {
+            editor.copyEditedImageToClipboard()
+        } label: {
+            Image(systemName: "doc.on.doc.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle)
+        .controlSize(.large)
+        .disabled(!editor.hasImage)
+        .foregroundStyle(copyFlash ? .green : .primary)
+        .shadow(color: copyFlash ? .green.opacity(0.45) : .clear, radius: 8)
+        .modifier(ShakeEffect(animatableData: copyShakeTrigger))
     }
 
     private func triggerCopyFeedback() {

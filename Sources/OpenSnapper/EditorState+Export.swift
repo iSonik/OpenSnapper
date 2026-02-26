@@ -3,6 +3,10 @@ import Foundation
 import SwiftUI
 
 extension EditorState {
+    private enum ExportActionDefaults {
+        static let actionExportFolderName = "OpenSnapper Exports"
+    }
+
     private func resolvedFilenameBase() -> String {
         let now = Date()
         let dateFormatter = DateFormatter()
@@ -48,40 +52,19 @@ extension EditorState {
         return candidate
     }
 
-    func exportPNG(forcePromptForLocation: Bool = false) {
-        guard let rendered = renderedImage() else {
-            setStatus(AppStrings.Messages.nothingToSave, isError: true)
-            return
+    @discardableResult
+    func exportPNG(forcePromptForLocation: Bool = false) -> URL? {
+        guard let encoded = encodedRenderedImageData() else {
+            return nil
         }
-
-        let format = exportFormat
-        guard
-            let tiff = rendered.tiffRepresentation,
-            let bitmap = NSBitmapImageRep(data: tiff)
-        else {
-            setStatus(AppStrings.Messages.failedToRenderImage, isError: true)
-            return
-        }
-
-        let data: Data?
-        switch format {
-        case .png:
-            data = bitmap.representation(using: .png, properties: [:])
-        case .jpg:
-            data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
-        }
-
-        guard let data else {
-            setStatus(AppStrings.Messages.failedToEncode(format.title), isError: true)
-            return
-        }
+        let format = encoded.format
 
         let outputURL: URL
         let shouldPromptForLocation = forcePromptForLocation || askForSaveLocationEachTime
         if !shouldPromptForLocation {
             guard let folderURL = defaultSaveFolderURL else {
                 setStatus(AppStrings.Messages.setDefaultFolderOrAsk, isError: true)
-                return
+                return nil
             }
             outputURL = uniqueSaveURL(in: folderURL, baseName: resolvedFilenameBase(), fileExtension: format.fileExtension)
         } else {
@@ -102,7 +85,7 @@ extension EditorState {
 
             guard panel.runModal() == .OK, var selectedURL = panel.url else {
                 setStatus(AppStrings.Messages.saveCanceled)
-                return
+                return nil
             }
             if selectedURL.pathExtension.isEmpty {
                 selectedURL.appendPathExtension(format.fileExtension)
@@ -111,13 +94,93 @@ extension EditorState {
         }
 
         do {
-            try data.write(to: outputURL)
+            try encoded.data.write(to: outputURL)
             let message = AppStrings.Messages.saved(outputURL.lastPathComponent)
             setStatus(message)
             showToast(message, isError: false)
+            return outputURL
         } catch {
             setStatus(AppStrings.Messages.saveFailed(error.localizedDescription), isError: true)
+            return nil
         }
+    }
+
+    func saveAndRevealExportInFinder() {
+        guard let outputURL = saveExportForQuickAction() else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([outputURL])
+        let message = AppStrings.Messages.savedAndRevealed(outputURL.lastPathComponent)
+        setStatus(message)
+        showToast(message, isError: false)
+    }
+
+    func dragProviderForSavedExportFile() -> NSItemProvider? {
+        guard let outputURL = saveExportForQuickAction() else { return nil }
+        let message = AppStrings.Messages.saved(outputURL.lastPathComponent)
+        setStatus(message)
+        showToast(message, isError: false)
+        return NSItemProvider(object: outputURL as NSURL)
+    }
+
+    private func saveExportForQuickAction() -> URL? {
+        guard let encoded = encodedRenderedImageData() else {
+            return nil
+        }
+        let outputURL = uniqueSaveURL(
+            in: quickActionExportFolderURL(),
+            baseName: resolvedFilenameBase(),
+            fileExtension: encoded.format.fileExtension
+        )
+
+        do {
+            try FileManager.default.createDirectory(
+                at: outputURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try encoded.data.write(to: outputURL)
+            return outputURL
+        } catch {
+            setStatus(AppStrings.Messages.saveFailed(error.localizedDescription), isError: true)
+            return nil
+        }
+    }
+
+    private func quickActionExportFolderURL() -> URL {
+        if let defaultSaveFolderURL {
+            return defaultSaveFolderURL
+        }
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent(ExportActionDefaults.actionExportFolderName, isDirectory: true)
+    }
+
+    private func encodedRenderedImageData() -> (data: Data, format: ExportFormat)? {
+        guard let rendered = renderedImage() else {
+            setStatus(AppStrings.Messages.nothingToSave, isError: true)
+            return nil
+        }
+
+        let format = exportFormat
+        guard
+            let tiff = rendered.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiff)
+        else {
+            setStatus(AppStrings.Messages.failedToRenderImage, isError: true)
+            return nil
+        }
+
+        let data: Data?
+        switch format {
+        case .png:
+            data = bitmap.representation(using: .png, properties: [:])
+        case .jpg:
+            data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
+        }
+
+        guard let data else {
+            setStatus(AppStrings.Messages.failedToEncode(format.title), isError: true)
+            return nil
+        }
+
+        return (data, format)
     }
 
     @discardableResult
@@ -127,8 +190,37 @@ extension EditorState {
             return false
         }
 
-        NSPasteboard.general.clearContents()
-        let wrote = NSPasteboard.general.writeObjects([rendered])
+        guard
+            let tiff = rendered.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiff)
+        else {
+            setStatus(AppStrings.Messages.failedToRenderImage, isError: true)
+            return false
+        }
+
+        let encodedData: Data?
+        switch copyImageFormat {
+        case .png:
+            encodedData = bitmap.representation(using: .png, properties: [:])
+        case .jpg:
+            encodedData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
+        }
+
+        guard let encodedData else {
+            setStatus(AppStrings.Messages.failedToEncode(copyImageFormat.title), isError: true)
+            return false
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let pasteboardType: NSPasteboard.PasteboardType = switch copyImageFormat {
+        case .png:
+            .png
+        case .jpg:
+            NSPasteboard.PasteboardType("public.jpeg")
+        }
+        pasteboard.declareTypes([pasteboardType], owner: nil)
+        let wrote = pasteboard.setData(encodedData, forType: pasteboardType)
         if wrote {
             copyFeedbackID = UUID()
         }

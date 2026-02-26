@@ -14,6 +14,7 @@ extension EditorState {
         static let defaultSaveFolderPath = "settings.defaultSaveFolderPath"
         static let filenameTemplate = "settings.filenameTemplate"
         static let exportFormat = "settings.exportFormat"
+        static let copyImageFormat = "settings.copyImageFormat"
         static let askForSaveLocationEachTime = "settings.askForSaveLocationEachTime"
         static let closeAppOnCopyShortcut = "settings.closeAppOnCopyShortcut"
         static let captureHotkey = "settings.captureHotkey"
@@ -38,6 +39,12 @@ extension EditorState {
             let parsed = ExportFormat(rawValue: value)
         {
             exportFormat = parsed
+        }
+        if
+            let value = defaults.string(forKey: DefaultsKey.copyImageFormat),
+            let parsed = ExportFormat(rawValue: value)
+        {
+            copyImageFormat = parsed
         }
         if defaults.object(forKey: DefaultsKey.askForSaveLocationEachTime) != nil {
             askForSaveLocationEachTime = defaults.bool(forKey: DefaultsKey.askForSaveLocationEachTime)
@@ -66,6 +73,7 @@ extension EditorState {
         defaults.set(defaultSaveFolderPath, forKey: DefaultsKey.defaultSaveFolderPath)
         defaults.set(filenameTemplate, forKey: DefaultsKey.filenameTemplate)
         defaults.set(exportFormat.rawValue, forKey: DefaultsKey.exportFormat)
+        defaults.set(copyImageFormat.rawValue, forKey: DefaultsKey.copyImageFormat)
         defaults.set(askForSaveLocationEachTime, forKey: DefaultsKey.askForSaveLocationEachTime)
         defaults.set(closeAppOnCopyShortcut, forKey: DefaultsKey.closeAppOnCopyShortcut)
         defaults.set(captureHotkey, forKey: DefaultsKey.captureHotkey)

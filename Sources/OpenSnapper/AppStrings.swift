@@ -17,6 +17,8 @@ enum AppStrings {
         static let selectImage = "Select Image"
         static let save = "Save"
         static let saveAs = "Save As..."
+        static let openInFinder = "Open in Finder"
+        static let dragSavedFile = "Drag Saved File"
         static let annotations = "Annotations"
         static let annotationTool = "Tool"
         static let annotationPreset = "Preset"
@@ -32,6 +34,7 @@ enum AppStrings {
         static let aspectRatio = "Aspect Ratio"
         static let iconShape = "Icon Shape"
         static let appIcon = "App Icon"
+        static let customPreset = "Custom"
         static let zoom = "Zoom"
         static let padding = "Padding"
         static let outerRadius = "Outer Radius"
@@ -100,6 +103,7 @@ enum AppStrings {
         static let nothingToUndo = "Nothing to undo"
         static let undidLastChange = "Undid last change"
         static let appliedAppIconLayout = "Applied App Icon layout"
+        static let appliedCustomLayout = "Applied custom layout"
         static let resetLayout = "Reset layout"
         static let autoCenterAfterRemoveBackground = "Auto center is available after Remove Background"
         static let analyzingCentering = "Analyzing centering..."
@@ -191,6 +195,10 @@ enum AppStrings {
 
         static func saved(_ filename: String) -> String {
             "Saved \(filename)"
+        }
+
+        static func savedAndRevealed(_ filename: String) -> String {
+            "Saved and revealed \(filename)"
         }
 
         static func saveFailed(_ detail: String) -> String {

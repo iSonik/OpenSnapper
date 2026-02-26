@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 extension EditorState {
     private enum ColorPickerDefaults {
@@ -50,6 +51,112 @@ extension EditorState {
         }
     }
 
+    func pickAnnotationColorFromScreenKeepingAppVisible() {
+        guard ensureScreenCaptureAccess(errorMessage: ColorPickerDefaults.permissionError) else {
+            return
+        }
+
+        if activeColorSampler != nil {
+            setStatus(AppStrings.Messages.colorPickerAlreadyActive)
+            return
+        }
+
+        isAnnotationCanvasColorPickerActive = false
+        clearAnnotationCanvasHoverColor()
+
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let sampler = NSColorSampler()
+        activeColorSampler = sampler
+        isColorPickerActive = true
+        startHoverColorTracking()
+        sampler.show { [weak self] color in
+            Task { @MainActor in
+                guard let self else { return }
+                defer {
+                    self.activeColorSampler = nil
+                    self.stopHoverColorTracking()
+                    self.isColorPickerActive = false
+                }
+
+                guard let color else {
+                    self.setStatus(AppStrings.Messages.colorPickerCanceled)
+                    return
+                }
+
+                let sRGBColor = color.usingColorSpace(.sRGB) ?? color
+                let hex = Self.hexString(from: sRGBColor)
+                self.annotationStylePreset = .custom
+                self.annotationCustomColor = Color(nsColor: sRGBColor)
+                self.rememberRecentColor(hex.uppercased())
+                let message = "Picked annotation color \(hex)"
+                self.showToast(message, isError: false)
+                self.statusMessage = message
+            }
+        }
+    }
+
+    func toggleAnnotationCanvasColorPicker() {
+        isAnnotationCanvasColorPickerActive.toggle()
+        if isAnnotationCanvasColorPickerActive {
+            annotationToolbarPopoverTool = nil
+            updateAnnotationCanvasHoverColor(at: .zero, in: canvasSize)
+            setStatus("Click the image to sample a color")
+        } else {
+            clearAnnotationCanvasHoverColor()
+        }
+    }
+
+    @discardableResult
+    func sampleAnnotationColorFromCanvas(at point: CGPoint, in canvasSize: CGSize) -> Bool {
+        guard canvasPointHitsDisplayedImage(point, in: canvasSize) else {
+            setStatus("Click inside the image to sample a color", isError: true)
+            return false
+        }
+
+        guard let sampled = sampledImageColor(at: point, in: canvasSize) else {
+            setStatus("Click inside the image to sample a color", isError: true)
+            return false
+        }
+
+        let sRGB = sampled.usingColorSpace(.sRGB) ?? sampled
+        annotationStylePreset = .custom
+        annotationCustomColor = Color(nsColor: sRGB)
+        isAnnotationCanvasColorPickerActive = false
+        clearAnnotationCanvasHoverColor()
+
+        let hex = Self.hexString(from: sRGB)
+        let message = "Picked annotation color \(hex)"
+        showToast(message, isError: false)
+        statusMessage = message
+        return true
+    }
+
+    func updateAnnotationCanvasHoverColor(at point: CGPoint, in canvasSize: CGSize) {
+        guard isAnnotationCanvasColorPickerActive else {
+            clearAnnotationCanvasHoverColor()
+            return
+        }
+
+        guard canvasPointHitsDisplayedImage(point, in: canvasSize),
+              let color = sampledImageColor(at: point, in: canvasSize)
+        else {
+            annotationCanvasHoverColor = nil
+            annotationCanvasHoverHex = nil
+            return
+        }
+
+        let sRGB = color.usingColorSpace(.sRGB) ?? color
+        annotationCanvasHoverColor = Color(nsColor: sRGB)
+        annotationCanvasHoverHex = Self.hexString(from: sRGB)
+    }
+
+    func clearAnnotationCanvasHoverColor() {
+        annotationCanvasHoverColor = nil
+        annotationCanvasHoverHex = nil
+    }
+
     private typealias HiddenColorPickerWindow = (window: NSWindow, alpha: CGFloat, ignoresMouseEvents: Bool)
 
     private func temporarilyHideVisibleWindowsForColorPicker() -> [HiddenColorPickerWindow] {
@@ -69,6 +176,100 @@ extension EditorState {
             hiddenWindow.window.ignoresMouseEvents = hiddenWindow.ignoresMouseEvents
             hiddenWindow.window.orderFrontRegardless()
         }
+    }
+
+    private func sampledImageColor(at canvasPoint: CGPoint, in canvasSize: CGSize) -> NSColor? {
+        guard let image = sourceImage else { return nil }
+        let imagePoint = sourceImagePixelPoint(from: canvasPoint, in: canvasSize, image: image)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        let x = Int(imagePoint.x.rounded(.down))
+        let y = Int(imagePoint.y.rounded(.down))
+        guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh else { return nil }
+        return bitmap.colorAt(x: x, y: y)
+    }
+
+    private func sourceImagePixelPoint(from canvasPoint: CGPoint, in canvasSize: CGSize, image: NSImage) -> CGPoint {
+        let availableWidth = max(1, canvasSize.width - (canvasPadding * 2))
+        let availableHeight = max(1, canvasSize.height - (canvasPadding * 2))
+        let imageWidth = max(image.size.width, 1)
+        let imageHeight = max(image.size.height, 1)
+        let imageAspect = imageWidth / imageHeight
+        let containerAspect = availableWidth / availableHeight
+
+        let fitted: CGSize
+        if containerAspect > imageAspect {
+            fitted = CGSize(width: availableHeight * imageAspect, height: availableHeight)
+        } else {
+            fitted = CGSize(width: availableWidth, height: availableWidth / imageAspect)
+        }
+
+        let baseRect = CGRect(
+            x: (canvasSize.width - fitted.width) / 2,
+            y: (canvasSize.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+
+        let effectiveScale = max(imageScale, 0.0001)
+        let transformedCenter = CGPoint(
+            x: baseRect.midX + imageOffsetX,
+            y: baseRect.midY + imageOffsetY
+        )
+        let unscaledCanvasPoint = CGPoint(
+            x: baseRect.midX + ((canvasPoint.x - transformedCenter.x) / effectiveScale),
+            y: baseRect.midY + ((canvasPoint.y - transformedCenter.y) / effectiveScale)
+        )
+
+        let normalizedX = (unscaledCanvasPoint.x - baseRect.minX) / max(baseRect.width, 1)
+        let normalizedY = (unscaledCanvasPoint.y - baseRect.minY) / max(baseRect.height, 1)
+
+        let clampedX = min(max(normalizedX, 0), 1)
+        let clampedY = min(max(normalizedY, 0), 1)
+
+        return CGPoint(
+            x: clampedX * CGFloat(max(1, Int(imageWidth) - 1)),
+            y: (1 - clampedY) * CGFloat(max(1, Int(imageHeight) - 1))
+        )
+    }
+
+    func canvasPointHitsDisplayedImage(_ canvasPoint: CGPoint, in canvasSize: CGSize) -> Bool {
+        guard let image = sourceImage else { return false }
+
+        let availableWidth = max(1, canvasSize.width - (canvasPadding * 2))
+        let availableHeight = max(1, canvasSize.height - (canvasPadding * 2))
+        let imageWidth = max(image.size.width, 1)
+        let imageHeight = max(image.size.height, 1)
+        let imageAspect = imageWidth / imageHeight
+        let containerAspect = availableWidth / availableHeight
+
+        let fitted: CGSize
+        if containerAspect > imageAspect {
+            fitted = CGSize(width: availableHeight * imageAspect, height: availableHeight)
+        } else {
+            fitted = CGSize(width: availableWidth, height: availableWidth / imageAspect)
+        }
+
+        let baseRect = CGRect(
+            x: (canvasSize.width - fitted.width) / 2,
+            y: (canvasSize.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+
+        let effectiveScale = max(imageScale, 0.0001)
+        let transformedCenter = CGPoint(
+            x: baseRect.midX + imageOffsetX,
+            y: baseRect.midY + imageOffsetY
+        )
+        let unscaledCanvasPoint = CGPoint(
+            x: baseRect.midX + ((canvasPoint.x - transformedCenter.x) / effectiveScale),
+            y: baseRect.midY + ((canvasPoint.y - transformedCenter.y) / effectiveScale)
+        )
+
+        return baseRect.contains(unscaledCanvasPoint)
     }
 
     func copyColorHexToClipboard(_ hex: String) {

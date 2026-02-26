@@ -27,6 +27,7 @@ extension EditorState {
             detectedSubjectCenterY: detectedSubjectCenterY,
             centeringSource: centeringSource,
             isAppIconLayout: isAppIconLayout,
+            isCustomLayoutMode: isCustomLayoutMode,
             appIconShape: appIconShape,
             backgroundStyle: backgroundStyle,
             solidColor: solidColor,
@@ -39,6 +40,25 @@ extension EditorState {
             imageOffsetX: imageOffsetX,
             imageOffsetY: imageOffsetY,
             aspectRatio: aspectRatio,
+            annotationStrokeWidth: annotationStrokeWidth,
+            annotationBoxFillColor: annotationBoxFillColor,
+            annotationBoxFillOpacity: annotationBoxFillOpacity,
+            annotationBoxCornerRadius: annotationBoxCornerRadius,
+            annotationDrawAutoSmooth: annotationDrawAutoSmooth,
+            annotationTextDefaultFontColor: annotationTextDefaultFontColor,
+            annotationTextDefaultBackgroundColor: annotationTextDefaultBackgroundColor,
+            annotationTextDefaultFontSize: annotationTextDefaultFontSize,
+            annotationTextDefaultAlignment: annotationTextDefaultAlignment,
+            annotationTextFontColorOverrides: annotationTextFontColorOverrides,
+            annotationTextBackgroundColorOverrides: annotationTextBackgroundColorOverrides,
+            annotationTextFontSizeOverrides: annotationTextFontSizeOverrides,
+            annotationTextAlignmentOverrides: annotationTextAlignmentOverrides,
+            annotationColorOverrides: annotationColorOverrides,
+            annotationStrokeWidthOverrides: annotationStrokeWidthOverrides,
+            annotationBoxFillColorOverrides: annotationBoxFillColorOverrides,
+            annotationBoxFillOpacityOverrides: annotationBoxFillOpacityOverrides,
+            annotationBoxCornerRadiusOverrides: annotationBoxCornerRadiusOverrides,
+            annotationDrawAutoSmoothOverrides: annotationDrawAutoSmoothOverrides,
             annotations: annotations,
             redactionRegions: redactionRegions
         )
@@ -54,6 +74,7 @@ extension EditorState {
         detectedSubjectCenterY = snapshot.detectedSubjectCenterY
         centeringSource = snapshot.centeringSource
         isAppIconLayout = snapshot.isAppIconLayout
+        isCustomLayoutMode = snapshot.isCustomLayoutMode
         appIconShape = snapshot.appIconShape
         backgroundStyle = snapshot.backgroundStyle
         solidColor = snapshot.solidColor
@@ -66,6 +87,25 @@ extension EditorState {
         imageOffsetX = snapshot.imageOffsetX
         imageOffsetY = snapshot.imageOffsetY
         aspectRatio = snapshot.aspectRatio
+        annotationStrokeWidth = snapshot.annotationStrokeWidth
+        annotationBoxFillColor = snapshot.annotationBoxFillColor
+        annotationBoxFillOpacity = snapshot.annotationBoxFillOpacity
+        annotationBoxCornerRadius = snapshot.annotationBoxCornerRadius
+        annotationDrawAutoSmooth = snapshot.annotationDrawAutoSmooth
+        annotationTextDefaultFontColor = snapshot.annotationTextDefaultFontColor
+        annotationTextDefaultBackgroundColor = snapshot.annotationTextDefaultBackgroundColor
+        annotationTextDefaultFontSize = snapshot.annotationTextDefaultFontSize
+        annotationTextDefaultAlignment = snapshot.annotationTextDefaultAlignment
+        annotationTextFontColorOverrides = snapshot.annotationTextFontColorOverrides
+        annotationTextBackgroundColorOverrides = snapshot.annotationTextBackgroundColorOverrides
+        annotationTextFontSizeOverrides = snapshot.annotationTextFontSizeOverrides
+        annotationTextAlignmentOverrides = snapshot.annotationTextAlignmentOverrides
+        annotationColorOverrides = snapshot.annotationColorOverrides
+        annotationStrokeWidthOverrides = snapshot.annotationStrokeWidthOverrides
+        annotationBoxFillColorOverrides = snapshot.annotationBoxFillColorOverrides
+        annotationBoxFillOpacityOverrides = snapshot.annotationBoxFillOpacityOverrides
+        annotationBoxCornerRadiusOverrides = snapshot.annotationBoxCornerRadiusOverrides
+        annotationDrawAutoSmoothOverrides = snapshot.annotationDrawAutoSmoothOverrides
         annotations = snapshot.annotations
         redactionRegions = snapshot.redactionRegions
         if isOriginalStyleLayoutLocked {

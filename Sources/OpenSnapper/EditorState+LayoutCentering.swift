@@ -23,6 +23,15 @@ extension EditorState {
         static let imageScale: CGFloat = 1.0
         static let imageOffsetX: CGFloat = 0
         static let imageOffsetY: CGFloat = 0
+
+        enum CustomPreset {
+            static let aspectRatio: CGFloat = 4.0 / 5.0
+            static let canvasPadding: CGFloat = 70
+            static let outerCornerRadius: CGFloat = 38
+            static let imageCornerRadius: CGFloat = 26
+            static let shadowRadius: CGFloat = 20
+            static let shadowOpacity: Double = 0.20
+        }
     }
 
     enum LayoutRanges {
@@ -42,21 +51,38 @@ extension EditorState {
     static let standardAspectPresets: [AspectPreset] = [
         AspectPreset(id: "16:10", title: "16:10", ratio: 16.0 / 10.0),
         AspectPreset(id: "16:9", title: "16:9", ratio: 16.0 / 9.0),
+        AspectPreset(id: "21:9", title: "21:9", ratio: 21.0 / 9.0),
+        AspectPreset(id: "3:2", title: "3:2", ratio: 3.0 / 2.0),
         AspectPreset(id: "4:3", title: "4:3", ratio: 4.0 / 3.0),
+        AspectPreset(id: "5:4", title: "5:4", ratio: 5.0 / 4.0),
         AspectPreset(id: "1:1", title: "1:1", ratio: 1.0),
+        AspectPreset(id: "4:5", title: "4:5", ratio: 4.0 / 5.0),
+        AspectPreset(id: "3:4", title: "3:4", ratio: 3.0 / 4.0),
+        AspectPreset(id: "2:3", title: "2:3", ratio: 2.0 / 3.0),
+        AspectPreset(id: "9:16", title: "9:16", ratio: 9.0 / 16.0),
     ]
 
     var selectedStandardAspectRatioID: String? {
-        guard !isAppIconLayout else { return nil }
+        guard !isAppIconLayout, !isCustomLayoutMode else { return nil }
         return Self.standardAspectPresets.first {
             abs($0.ratio - aspectRatio) < LayoutCenteringDefaults.aspectSelectionTolerance
         }?.id
+    }
+
+    var isCustomRoundedLayoutPreset: Bool {
+        guard !isAppIconLayout else { return false }
+        return
+            abs(aspectRatio - LayoutDefaults.CustomPreset.aspectRatio) < LayoutCenteringDefaults.aspectSelectionTolerance &&
+            abs(canvasPadding - LayoutDefaults.CustomPreset.canvasPadding) < 0.5 &&
+            abs(outerCornerRadius - LayoutDefaults.CustomPreset.outerCornerRadius) < 0.5 &&
+            abs(imageCornerRadius - LayoutDefaults.CustomPreset.imageCornerRadius) < 0.5
     }
 
     func setAspectRatio(_ ratio: CGFloat) {
         guard !isOriginalStyleLayoutLocked else { return }
         recordUndoCheckpoint()
         isAppIconLayout = false
+        isCustomLayoutMode = false
         aspectRatio = ratio
     }
 
@@ -64,6 +90,7 @@ extension EditorState {
         guard !isOriginalStyleLayoutLocked else { return }
         recordUndoCheckpoint()
         isAppIconLayout = true
+        isCustomLayoutMode = false
         aspectRatio = 1.0
         canvasPadding = LayoutDefaults.canvasPadding
         outerCornerRadius = LayoutDefaults.outerCornerRadius
@@ -76,11 +103,39 @@ extension EditorState {
         setStatus(AppStrings.Messages.appliedAppIconLayout)
     }
 
+    func applyCustomRoundedLayoutPreset() {
+        guard !isOriginalStyleLayoutLocked else { return }
+        recordUndoCheckpoint()
+        isAppIconLayout = false
+        isCustomLayoutMode = true
+        aspectRatio = LayoutDefaults.CustomPreset.aspectRatio
+        canvasPadding = LayoutDefaults.CustomPreset.canvasPadding
+        outerCornerRadius = LayoutDefaults.CustomPreset.outerCornerRadius
+        imageCornerRadius = LayoutDefaults.CustomPreset.imageCornerRadius
+        shadowRadius = LayoutDefaults.CustomPreset.shadowRadius
+        shadowOpacity = LayoutDefaults.CustomPreset.shadowOpacity
+        setStatus(AppStrings.Messages.appliedCustomLayout)
+    }
+
+    func applyCustomLayout(
+        aspectRatio: CGFloat,
+        outerCornerRadius: CGFloat
+    ) {
+        guard !isOriginalStyleLayoutLocked else { return }
+        recordUndoCheckpoint()
+        isAppIconLayout = false
+        isCustomLayoutMode = true
+        self.aspectRatio = max(aspectRatio, LayoutCenteringDefaults.minRenderAspect)
+        self.outerCornerRadius = Self.clamp(outerCornerRadius, to: LayoutRanges.outerCornerRadius)
+        setStatus(AppStrings.Messages.appliedCustomLayout)
+    }
+
     func resetLayoutAdjustments() {
         recordUndoCheckpoint()
         imageScale = LayoutDefaults.imageScale
         imageOffsetX = LayoutDefaults.imageOffsetX
         imageOffsetY = LayoutDefaults.imageOffsetY
+        isCustomLayoutMode = false
         canvasPadding = LayoutDefaults.canvasPadding
         outerCornerRadius = LayoutDefaults.outerCornerRadius
         imageCornerRadius = LayoutDefaults.imageCornerRadius
@@ -95,6 +150,7 @@ extension EditorState {
         recordUndoCheckpoint()
         appIconShape = shape
         isAppIconLayout = true
+        isCustomLayoutMode = false
         setStatus(AppStrings.Messages.appIconShape(shape.title))
     }
 

@@ -26,6 +26,12 @@ struct SettingsView: View {
                     }
                 }
 
+                Picker("Copy Format", selection: $editor.copyImageFormat) {
+                    ForEach(EditorState.ExportFormat.allCases) { format in
+                        Text(format.title).tag(format)
+                    }
+                }
+
                 TextField("Filename Template", text: $editor.filenameTemplate)
                     .textFieldStyle(.roundedBorder)
 

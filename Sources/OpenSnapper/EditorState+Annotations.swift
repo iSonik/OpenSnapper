@@ -7,6 +7,7 @@ extension EditorState {
         annotationTool = tool
         draftAnnotationStart = nil
         draftAnnotationCurrent = nil
+        draftFreehandPoints = []
         if tool != .none {
             editingTextAnnotationID = nil
         }
@@ -20,23 +21,48 @@ extension EditorState {
     }
 
     func beginAnnotationDrag(at point: CGPoint, in canvas: CGSize) {
-        guard annotationTool == .box || annotationTool == .arrow, canvas.width > 1, canvas.height > 1 else { return }
+        guard annotationTool == .box || annotationTool == .arrow || annotationTool == .lupe, canvas.width > 1, canvas.height > 1 else { return }
         recordUndoCheckpoint()
         let normalized = normalizedCanvasPoint(from: point, canvas: canvas)
         draftAnnotationStart = normalized
         draftAnnotationCurrent = normalized
     }
 
+    func beginFreehandAnnotation(at point: CGPoint, in canvas: CGSize) {
+        guard annotationTool == .draw, canvas.width > 1, canvas.height > 1 else { return }
+        recordUndoCheckpoint()
+        let normalized = normalizedCanvasPoint(from: point, canvas: canvas)
+        draftFreehandPoints = [normalized]
+    }
+
     func updateAnnotationDrag(at point: CGPoint, in canvas: CGSize) {
-        guard draftAnnotationStart != nil, canvas.width > 1, canvas.height > 1 else { return }
-        draftAnnotationCurrent = normalizedCanvasPoint(from: point, canvas: canvas)
+        guard let draftStart = draftAnnotationStart, canvas.width > 1, canvas.height > 1 else { return }
+        let normalized = normalizedCanvasPoint(from: point, canvas: canvas)
+        if annotationTool == .lupe {
+            draftAnnotationCurrent = adjustedLupeCreationEnd(start: draftStart, end: normalized, in: canvas)
+        } else {
+            draftAnnotationCurrent = normalized
+        }
+    }
+
+    func updateFreehandAnnotation(at point: CGPoint, in canvas: CGSize) {
+        guard annotationTool == .draw, canvas.width > 1, canvas.height > 1 else { return }
+        let normalized = normalizedCanvasPoint(from: point, canvas: canvas)
+        if let last = draftFreehandPoints.last {
+            let thresholdX = max(1.5 / canvas.width, 0.0006)
+            let thresholdY = max(1.5 / canvas.height, 0.0006)
+            if abs(normalized.x - last.x) < thresholdX, abs(normalized.y - last.y) < thresholdY {
+                return
+            }
+        }
+        draftFreehandPoints.append(normalized)
     }
 
     func commitAnnotationDrag() {
         guard
             let start = draftAnnotationStart,
             let end = draftAnnotationCurrent,
-            annotationTool == .box || annotationTool == .arrow
+            annotationTool == .box || annotationTool == .arrow || annotationTool == .lupe
         else {
             draftAnnotationStart = nil
             draftAnnotationCurrent = nil
@@ -45,31 +71,93 @@ extension EditorState {
 
         let distance = hypot(end.x - start.x, end.y - start.y)
         if distance >= 0.002 {
-            let kind: Annotation.Kind = annotationTool == .arrow ? .arrow : .box
+            let kind: Annotation.Kind
+            switch annotationTool {
+            case .arrow:
+                kind = .arrow
+            case .lupe:
+                kind = .lupe
+            default:
+                kind = .box
+            }
+            let id = UUID()
             annotations.append(
                 Annotation(
-                    id: UUID(),
+                    id: id,
                     kind: kind,
                     stylePreset: annotationStylePreset,
                     start: start,
                     end: end,
                     text: nil,
-                    textBoxWidth: nil,
+                    textBoxWidth: kind == .lupe ? defaultLupeSourceRadiusNormalized(in: canvasSize) : nil,
                     textBoxHeight: nil
                 )
             )
+            storeStyleOverrides(for: id, kind: kind)
             setStatus(AppStrings.Messages.arrowAdded(for: kind.title))
             selectedAnnotationID = annotations.last?.id
-            setAnnotationTool(.none)
         }
 
         draftAnnotationStart = nil
         draftAnnotationCurrent = nil
     }
 
+    func commitFreehandAnnotation() {
+        guard annotationTool == .draw else {
+            draftFreehandPoints = []
+            return
+        }
+
+        defer { draftFreehandPoints = [] }
+        guard draftFreehandPoints.count >= 2 else { return }
+
+        var minX = CGFloat.greatestFiniteMagnitude
+        var minY = CGFloat.greatestFiniteMagnitude
+        var maxX = -CGFloat.greatestFiniteMagnitude
+        var maxY = -CGFloat.greatestFiniteMagnitude
+        var pathLength: CGFloat = 0
+        for index in draftFreehandPoints.indices {
+            let point = draftFreehandPoints[index]
+            minX = min(minX, point.x)
+            minY = min(minY, point.y)
+            maxX = max(maxX, point.x)
+            maxY = max(maxY, point.y)
+            if index > 0 {
+                let prev = draftFreehandPoints[index - 1]
+                pathLength += hypot(point.x - prev.x, point.y - prev.y)
+            }
+        }
+        guard pathLength >= 0.003 else { return }
+
+        let start = CGPoint(x: minX, y: minY)
+        let end = CGPoint(x: maxX, y: maxY)
+        let id = UUID()
+        annotations.append(
+            Annotation(
+                id: id,
+                kind: .draw,
+                stylePreset: annotationStylePreset,
+                start: start,
+                end: end,
+                text: nil,
+                textBoxWidth: nil,
+                textBoxHeight: nil,
+                controlPoint: nil,
+                points: draftFreehandPoints
+            )
+        )
+        storeStyleOverrides(for: id, kind: .draw)
+        selectedAnnotationID = id
+        setStatus(AppStrings.Messages.arrowAdded(for: Annotation.Kind.draw.title))
+    }
+
     func cancelAnnotationDrag() {
         draftAnnotationStart = nil
         draftAnnotationCurrent = nil
+    }
+
+    func cancelFreehandAnnotation() {
+        draftFreehandPoints = []
     }
 
     func addTextAnnotation(at point: CGPoint, in canvas: CGSize) {
@@ -89,13 +177,15 @@ extension EditorState {
                 end: normalized,
                 text: text.isEmpty ? "Text" : text,
                 textBoxWidth: defaultTextBoxWidth,
-                textBoxHeight: defaultTextBoxHeight
+                textBoxHeight: defaultTextBoxHeight,
+                controlPoint: nil,
+                points: []
             )
         )
+        storeStyleOverrides(for: id, kind: .text)
         setStatus(AppStrings.Messages.arrowAdded(for: Annotation.Kind.text.title))
         selectedAnnotationID = id
         editingTextAnnotationID = nil
-        setAnnotationTool(.none)
     }
 
     func beginEditingTextAnnotationIfHit(at point: CGPoint, in canvas: CGSize) -> Bool {
@@ -123,7 +213,9 @@ extension EditorState {
             end: current.end,
             text: text,
             textBoxWidth: current.textBoxWidth,
-            textBoxHeight: current.textBoxHeight
+            textBoxHeight: current.textBoxHeight,
+            controlPoint: current.controlPoint,
+            points: current.points
         )
         if editingTextAnnotationID == id {
             annotationTextDraft = text
@@ -168,6 +260,12 @@ extension EditorState {
 
         let movedStart = clampedNormalizedPoint(CGPoint(x: current.start.x + dx, y: current.start.y + dy))
         let movedEnd = clampedNormalizedPoint(CGPoint(x: current.end.x + dx, y: current.end.y + dy))
+        let movedControlPoint = current.controlPoint.map {
+            clampedNormalizedPoint(CGPoint(x: $0.x + dx, y: $0.y + dy))
+        }
+        let movedPoints = current.points.map {
+            clampedNormalizedPoint(CGPoint(x: $0.x + dx, y: $0.y + dy))
+        }
 
         annotations[index] = Annotation(
             id: current.id,
@@ -177,7 +275,9 @@ extension EditorState {
             end: movedEnd,
             text: current.text,
             textBoxWidth: current.textBoxWidth,
-            textBoxHeight: current.textBoxHeight
+            textBoxHeight: current.textBoxHeight,
+            controlPoint: movedControlPoint,
+            points: movedPoints
         )
     }
 
@@ -231,14 +331,16 @@ extension EditorState {
             end: CGPoint(x: updatedRect.maxX, y: updatedRect.maxY),
             text: current.text,
             textBoxWidth: current.textBoxWidth,
-            textBoxHeight: current.textBoxHeight
+            textBoxHeight: current.textBoxHeight,
+            controlPoint: current.controlPoint,
+            points: current.points
         )
     }
 
     func resizeArrowAnnotation(_ id: UUID, movingStart: Bool, to point: CGPoint, in canvas: CGSize) {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         let current = annotations[index]
-        guard current.kind == .arrow, canvas.width > 1, canvas.height > 1 else { return }
+        guard (current.kind == .arrow || current.kind == .lupe), canvas.width > 1, canvas.height > 1 else { return }
 
         let normalized = normalizedCanvasPoint(from: point, canvas: canvas)
         annotations[index] = Annotation(
@@ -249,7 +351,61 @@ extension EditorState {
             end: movingStart ? current.end : normalized,
             text: current.text,
             textBoxWidth: current.textBoxWidth,
-            textBoxHeight: current.textBoxHeight
+            textBoxHeight: current.textBoxHeight,
+            controlPoint: current.controlPoint,
+            points: current.points
+        )
+    }
+
+    func resizeArrowBendAnnotation(_ id: UUID, to point: CGPoint, in canvas: CGSize) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        let current = annotations[index]
+        guard current.kind == .arrow, canvas.width > 1, canvas.height > 1 else { return }
+        let midpoint = normalizedCanvasPoint(from: point, canvas: canvas)
+        let control = clampedNormalizedPoint(
+            CGPoint(
+                x: (2 * midpoint.x) - ((current.start.x + current.end.x) / 2),
+                y: (2 * midpoint.y) - ((current.start.y + current.end.y) / 2)
+            )
+        )
+        annotations[index] = Annotation(
+            id: current.id,
+            kind: current.kind,
+            stylePreset: current.stylePreset,
+            start: current.start,
+            end: current.end,
+            text: current.text,
+            textBoxWidth: current.textBoxWidth,
+            textBoxHeight: current.textBoxHeight,
+            controlPoint: control,
+            points: current.points
+        )
+    }
+
+    func resizeLupeSourceRadiusAnnotation(_ id: UUID, to point: CGPoint, in canvas: CGSize) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        let current = annotations[index]
+        guard current.kind == .lupe, canvas.width > 1, canvas.height > 1 else { return }
+
+        let center = CGPoint(x: current.start.x * canvas.width, y: current.start.y * canvas.height)
+        let rawRadius = hypot(point.x - center.x, point.y - center.y)
+        let minDimension = max(min(canvas.width, canvas.height), 1)
+        let normalized = min(
+            lupeSourceRadiusNormalizedRange.upperBound,
+            max(lupeSourceRadiusNormalizedRange.lowerBound, rawRadius / minDimension)
+        )
+
+        annotations[index] = Annotation(
+            id: current.id,
+            kind: current.kind,
+            stylePreset: current.stylePreset,
+            start: current.start,
+            end: current.end,
+            text: current.text,
+            textBoxWidth: normalized,
+            textBoxHeight: current.textBoxHeight,
+            controlPoint: current.controlPoint,
+            points: current.points
         )
     }
 
@@ -259,7 +415,7 @@ extension EditorState {
         guard current.kind == .text, canvas.width > 1, canvas.height > 1 else { return }
 
         let currentRect = textAnnotationVisibleRect(for: current, in: canvas)
-        let metrics = textAnnotationMetrics()
+        let metrics = textAnnotationMetrics(for: current)
         let minWidth = metrics.minBubbleWidth
         let minHeight = metrics.minBubbleHeight
         var left = currentRect.minX
@@ -293,7 +449,9 @@ extension EditorState {
             end: normalizedCenter,
             text: current.text,
             textBoxWidth: normalizedWidth,
-            textBoxHeight: normalizedHeight
+            textBoxHeight: normalizedHeight,
+            controlPoint: current.controlPoint,
+            points: current.points
         )
     }
 
@@ -301,10 +459,12 @@ extension EditorState {
         guard !annotations.isEmpty else { return }
         recordUndoCheckpoint()
         annotations.removeAll()
+        clearAllAnnotationStyleOverrides()
         selectedAnnotationID = nil
         editingTextAnnotationID = nil
         draftAnnotationStart = nil
         draftAnnotationCurrent = nil
+        draftFreehandPoints = []
         setStatus(AppStrings.Messages.clearAnnotations)
     }
 
@@ -316,6 +476,7 @@ extension EditorState {
         }
 
         recordUndoCheckpoint()
+        removeStyleOverrides(for: selectedAnnotationID)
         annotations.remove(at: index)
         self.selectedAnnotationID = nil
         editingTextAnnotationID = nil
@@ -389,7 +550,7 @@ extension EditorState {
     private func textAnnotationVisibleRect(for annotation: Annotation, in canvas: CGSize) -> CGRect {
         let center = CGPoint(x: annotation.start.x * canvas.width, y: annotation.start.y * canvas.height)
         let text = (annotation.text?.isEmpty == false ? annotation.text : "Text") ?? "Text"
-        let metrics = textAnnotationMetrics()
+        let metrics = textAnnotationMetrics(for: annotation)
         let font = NSFont.systemFont(ofSize: metrics.fontSize, weight: .semibold)
 
         let bubbleWidth: CGFloat
@@ -438,7 +599,7 @@ extension EditorState {
             if let matched = handles.first(where: { hypot($0.1.x - point.x, $0.1.y - point.y) <= handleRadius }) {
                 return .boxCorner(annotation.id, matched.0)
             }
-        case .arrow:
+        case .arrow, .lupe:
             let handleRadius: CGFloat = 8
             let start = CGPoint(x: annotation.start.x * canvas.width, y: annotation.start.y * canvas.height)
             let end = CGPoint(x: annotation.end.x * canvas.width, y: annotation.end.y * canvas.height)
@@ -447,6 +608,25 @@ extension EditorState {
             }
             if hypot(end.x - point.x, end.y - point.y) <= handleRadius {
                 return .arrowEnd(annotation.id)
+            }
+            if annotation.kind == .arrow {
+                let bendHandle = arrowBendHandlePoint(for: annotation, in: canvas)
+                if hypot(bendHandle.x - point.x, bendHandle.y - point.y) <= 10 {
+                    return .arrowBend(annotation.id)
+                }
+            }
+            if annotation.kind == .lupe {
+                let sourceRadius = lupeSourceRadius(for: annotation, in: canvas)
+                let radiusHandle = CGPoint(x: start.x + sourceRadius, y: start.y)
+                if hypot(radiusHandle.x - point.x, radiusHandle.y - point.y) <= 10 {
+                    return .lupeRadius(annotation.id)
+                }
+            }
+        case .draw:
+            let handleRadius: CGFloat = 10
+            let handle = drawMoveHandlePoint(for: annotation, in: canvas)
+            if hypot(handle.x - point.x, handle.y - point.y) <= handleRadius {
+                return .drawMove(annotation.id)
             }
         case .text:
             let handleRadius: CGFloat = 14
@@ -480,7 +660,23 @@ extension EditorState {
         case .arrow:
             let start = CGPoint(x: annotation.start.x * canvas.width, y: annotation.start.y * canvas.height)
             let end = CGPoint(x: annotation.end.x * canvas.width, y: annotation.end.y * canvas.height)
+            if let control = annotation.controlPoint.map({ CGPoint(x: $0.x * canvas.width, y: $0.y * canvas.height) }) {
+                return distanceFromPoint(point, toQuadraticCurveStart: start, control: control, end: end) <= 10
+            }
             return distanceFromPoint(point, toSegmentStart: start, end: end) <= 10
+        case .lupe:
+            let source = CGPoint(x: annotation.start.x * canvas.width, y: annotation.start.y * canvas.height)
+            let lens = CGPoint(x: annotation.end.x * canvas.width, y: annotation.end.y * canvas.height)
+            let sourceRadius = lupeSourceRadius(for: annotation, in: canvas)
+            let lensRadius = lupeLensRadius(for: annotation, in: canvas)
+            if hypot(point.x - source.x, point.y - source.y) <= sourceRadius + 8 { return true }
+            if hypot(point.x - lens.x, point.y - lens.y) <= lensRadius + 8 { return true }
+            return distanceFromPoint(point, toSegmentStart: source, end: lens) <= 10
+        case .draw:
+            let points = annotation.points.map { CGPoint(x: $0.x * canvas.width, y: $0.y * canvas.height) }
+            guard points.count >= 2 else { return false }
+            let strokeWidth = annotationStrokeWidthOverrides[annotation.id] ?? annotationStrokeWidth
+            return distanceFromPoint(point, toPolyline: points) <= max(10, strokeWidth + 6)
         case .text:
             return textAnnotationHitRect(for: annotation, in: canvas).contains(point)
         }
@@ -517,13 +713,186 @@ extension EditorState {
         return hypot(point.x - projection.x, point.y - projection.y)
     }
 
-    private func textAnnotationMetrics() -> (
+    private func distanceFromPoint(_ point: CGPoint, toPolyline points: [CGPoint]) -> CGFloat {
+        guard points.count >= 2 else { return .greatestFiniteMagnitude }
+        var best = CGFloat.greatestFiniteMagnitude
+        for index in 1..<points.count {
+            best = min(best, distanceFromPoint(point, toSegmentStart: points[index - 1], end: points[index]))
+        }
+        return best
+    }
+
+    private func distanceFromPoint(_ point: CGPoint, toQuadraticCurveStart start: CGPoint, control: CGPoint, end: CGPoint) -> CGFloat {
+        let samples = sampledQuadraticPoints(start: start, control: control, end: end, count: 24)
+        return distanceFromPoint(point, toPolyline: samples)
+    }
+
+    private func arrowBendHandlePoint(for annotation: Annotation, in canvas: CGSize) -> CGPoint {
+        let start = CGPoint(x: annotation.start.x * canvas.width, y: annotation.start.y * canvas.height)
+        let end = CGPoint(x: annotation.end.x * canvas.width, y: annotation.end.y * canvas.height)
+        guard let control = annotation.controlPoint else {
+            return CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+        }
+        let controlCanvas = CGPoint(x: control.x * canvas.width, y: control.y * canvas.height)
+        return CGPoint(
+            x: ((start.x + end.x) * 0.25) + (controlCanvas.x * 0.5),
+            y: ((start.y + end.y) * 0.25) + (controlCanvas.y * 0.5)
+        )
+    }
+
+    private func sampledQuadraticPoints(start: CGPoint, control: CGPoint, end: CGPoint, count: Int) -> [CGPoint] {
+        let sampleCount = max(count, 2)
+        var result: [CGPoint] = []
+        result.reserveCapacity(sampleCount + 1)
+        for step in 0...sampleCount {
+            let t = CGFloat(step) / CGFloat(sampleCount)
+            let mt = 1 - t
+            result.append(CGPoint(
+                x: (mt * mt * start.x) + (2 * mt * t * control.x) + (t * t * end.x),
+                y: (mt * mt * start.y) + (2 * mt * t * control.y) + (t * t * end.y)
+            ))
+        }
+        return result
+    }
+
+    private func drawMoveHandlePoint(for annotation: Annotation, in canvas: CGSize) -> CGPoint {
+        let points = annotation.points.map { CGPoint(x: $0.x * canvas.width, y: $0.y * canvas.height) }
+        return polylineMidpoint(points) ?? CGPoint(
+            x: annotation.start.x * canvas.width,
+            y: annotation.start.y * canvas.height
+        )
+    }
+
+    private func polylineMidpoint(_ points: [CGPoint]) -> CGPoint? {
+        guard let first = points.first else { return nil }
+        guard points.count >= 2 else { return first }
+
+        var segmentLengths: [CGFloat] = []
+        segmentLengths.reserveCapacity(points.count - 1)
+        var total: CGFloat = 0
+        for index in 1..<points.count {
+            let a = points[index - 1]
+            let b = points[index]
+            let length = hypot(b.x - a.x, b.y - a.y)
+            segmentLengths.append(length)
+            total += length
+        }
+
+        guard total > 0.001 else { return points[points.count / 2] }
+        let target = total * 0.5
+        var traversed: CGFloat = 0
+
+        for index in 1..<points.count {
+            let segmentLength = segmentLengths[index - 1]
+            let nextTraversed = traversed + segmentLength
+            if target <= nextTraversed, segmentLength > 0.001 {
+                let t = (target - traversed) / segmentLength
+                let a = points[index - 1]
+                let b = points[index]
+                return CGPoint(
+                    x: a.x + ((b.x - a.x) * t),
+                    y: a.y + ((b.y - a.y) * t)
+                )
+            }
+            traversed = nextTraversed
+        }
+
+        return points.last
+    }
+
+    private var lupeSourceRadiusNormalizedRange: ClosedRange<CGFloat> {
+        0.02...0.22
+    }
+
+    private func defaultLupeSourceRadiusNormalized(in canvas: CGSize) -> CGFloat {
+        let minDimension = max(min(canvas.width, canvas.height), 1)
+        let normalized = max(24 / minDimension, 0.05)
+        return min(lupeSourceRadiusNormalizedRange.upperBound, max(lupeSourceRadiusNormalizedRange.lowerBound, normalized))
+    }
+
+    private func lupeSourceRadius(for annotation: Annotation, in canvas: CGSize) -> CGFloat {
+        let minDimension = max(min(canvas.width, canvas.height), 1)
+        let normalized = annotation.textBoxWidth ?? defaultLupeSourceRadiusNormalized(in: canvas)
+        let clamped = min(lupeSourceRadiusNormalizedRange.upperBound, max(lupeSourceRadiusNormalizedRange.lowerBound, normalized))
+        return clamped * minDimension
+    }
+
+    private func lupeLensRadius(for annotation: Annotation, in canvas: CGSize) -> CGFloat {
+        max(44, lupeSourceRadius(for: annotation, in: canvas) * 1.7)
+    }
+
+    private func adjustedLupeCreationEnd(start: CGPoint, end: CGPoint, in canvas: CGSize) -> CGPoint {
+        let startPoint = CGPoint(x: start.x * canvas.width, y: start.y * canvas.height)
+        let endPoint = CGPoint(x: end.x * canvas.width, y: end.y * canvas.height)
+        let dx = endPoint.x - startPoint.x
+        let dy = endPoint.y - startPoint.y
+        let rawDistance = hypot(dx, dy)
+
+        let sourceRadius = defaultLupeSourceRadiusNormalized(in: canvas) * max(min(canvas.width, canvas.height), 1)
+        let lensRadius = max(44, sourceRadius * 1.7)
+        let minimumDistance = sourceRadius + lensRadius + 22
+        guard rawDistance > 0.001, rawDistance < minimumDistance else { return end }
+
+        let ux = dx / rawDistance
+        let uy = dy / rawDistance
+        let expanded = CGPoint(
+            x: startPoint.x + ux * minimumDistance,
+            y: startPoint.y + uy * minimumDistance
+        )
+        return normalizedCanvasPoint(from: expanded, canvas: canvas)
+    }
+
+    private func storeStyleOverrides(for id: UUID, kind: Annotation.Kind) {
+        annotationColorOverrides[id] = annotationCustomColor
+        annotationStrokeWidthOverrides[id] = annotationStrokeWidth
+        annotationBoxFillColorOverrides[id] = annotationBoxFillColor
+        annotationBoxFillOpacityOverrides[id] = annotationBoxFillOpacity
+        annotationBoxCornerRadiusOverrides[id] = annotationBoxCornerRadius
+        if kind == .draw {
+            annotationDrawAutoSmoothOverrides[id] = annotationDrawAutoSmooth
+        }
+        if kind == .text {
+            annotationTextFontColorOverrides[id] = annotationTextDefaultFontColor
+            annotationTextBackgroundColorOverrides[id] = annotationTextDefaultBackgroundColor
+            annotationTextFontSizeOverrides[id] = annotationTextDefaultFontSize
+            annotationTextAlignmentOverrides[id] = annotationTextDefaultAlignment
+        }
+    }
+
+    private func removeStyleOverrides(for id: UUID) {
+        annotationTextFontColorOverrides.removeValue(forKey: id)
+        annotationTextBackgroundColorOverrides.removeValue(forKey: id)
+        annotationTextFontSizeOverrides.removeValue(forKey: id)
+        annotationTextAlignmentOverrides.removeValue(forKey: id)
+        annotationColorOverrides.removeValue(forKey: id)
+        annotationStrokeWidthOverrides.removeValue(forKey: id)
+        annotationBoxFillColorOverrides.removeValue(forKey: id)
+        annotationBoxFillOpacityOverrides.removeValue(forKey: id)
+        annotationBoxCornerRadiusOverrides.removeValue(forKey: id)
+        annotationDrawAutoSmoothOverrides.removeValue(forKey: id)
+    }
+
+    private func clearAllAnnotationStyleOverrides() {
+        annotationTextFontColorOverrides.removeAll()
+        annotationTextBackgroundColorOverrides.removeAll()
+        annotationTextFontSizeOverrides.removeAll()
+        annotationTextAlignmentOverrides.removeAll()
+        annotationColorOverrides.removeAll()
+        annotationStrokeWidthOverrides.removeAll()
+        annotationBoxFillColorOverrides.removeAll()
+        annotationBoxFillOpacityOverrides.removeAll()
+        annotationBoxCornerRadiusOverrides.removeAll()
+        annotationDrawAutoSmoothOverrides.removeAll()
+    }
+
+    private func textAnnotationMetrics(for annotation: Annotation? = nil) -> (
         fontSize: CGFloat,
         horizontalPadding: CGFloat,
         verticalPadding: CGFloat,
         minBubbleWidth: CGFloat,
         minBubbleHeight: CGFloat
     ) {
-        (fontSize: 16, horizontalPadding: 10, verticalPadding: 6, minBubbleWidth: 44, minBubbleHeight: 28)
+        let fontSize = annotation.map { annotationTextFontSizeOverrides[$0.id] ?? annotationTextDefaultFontSize } ?? annotationTextDefaultFontSize
+        return (fontSize: fontSize, horizontalPadding: 10, verticalPadding: 6, minBubbleWidth: 44, minBubbleHeight: 28)
     }
 }

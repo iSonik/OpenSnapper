@@ -36,6 +36,7 @@ final class EditorState: ObservableObject {
         didSet { updateCenteringIndicator() }
     }
     @Published var isAppIconLayout: Bool = false
+    @Published var isCustomLayoutMode: Bool = false
     @Published var appIconShape: AppIconShape = .classic
     @Published var statusMessage: String = AppStrings.Messages.noImageSelected
     @Published var hasScreenCaptureAccess: Bool = false
@@ -54,6 +55,9 @@ final class EditorState: ObservableObject {
         didSet { persistPreferences() }
     }
     @Published var exportFormat: ExportFormat = .png {
+        didSet { persistPreferences() }
+    }
+    @Published var copyImageFormat: ExportFormat = .png {
         didSet { persistPreferences() }
     }
     @Published var askForSaveLocationEachTime: Bool = true {
@@ -90,6 +94,26 @@ final class EditorState: ObservableObject {
     @Published var annotationTool: AnnotationTool = .none
     @Published var annotationStylePreset: AnnotationStylePreset = .callout
     @Published var annotationCustomColor: Color = Color(red: 0.11, green: 0.61, blue: 0.97)
+    @Published var annotationToolbarPopoverTool: AnnotationTool?
+    @Published var annotationStrokeWidth: CGFloat = 3
+    @Published var annotationBoxFillColor: Color = Color(red: 0.11, green: 0.61, blue: 0.97)
+    @Published var annotationBoxFillOpacity: Double = 0.14
+    @Published var annotationBoxCornerRadius: CGFloat = 10
+    @Published var annotationDrawAutoSmooth: Bool = true
+    @Published var annotationTextDefaultFontColor: Color = .white
+    @Published var annotationTextDefaultBackgroundColor: Color = Color(red: 0.11, green: 0.61, blue: 0.97).opacity(0.92)
+    @Published var annotationTextDefaultFontSize: CGFloat = 16
+    @Published var annotationTextDefaultAlignment: AnnotationTextAlignment = .center
+    @Published var annotationTextFontColorOverrides: [UUID: Color] = [:]
+    @Published var annotationTextBackgroundColorOverrides: [UUID: Color] = [:]
+    @Published var annotationTextFontSizeOverrides: [UUID: CGFloat] = [:]
+    @Published var annotationTextAlignmentOverrides: [UUID: AnnotationTextAlignment] = [:]
+    @Published var annotationColorOverrides: [UUID: Color] = [:]
+    @Published var annotationStrokeWidthOverrides: [UUID: CGFloat] = [:]
+    @Published var annotationBoxFillColorOverrides: [UUID: Color] = [:]
+    @Published var annotationBoxFillOpacityOverrides: [UUID: Double] = [:]
+    @Published var annotationBoxCornerRadiusOverrides: [UUID: CGFloat] = [:]
+    @Published var annotationDrawAutoSmoothOverrides: [UUID: Bool] = [:]
     @Published var annotationTextDraft: String = "Text"
     @Published var editingTextAnnotationID: UUID?
     @Published var selectedAnnotationID: UUID?
@@ -97,9 +121,13 @@ final class EditorState: ObservableObject {
     @Published var redactionRegions: [SensitiveRegion] = []
     @Published var draftAnnotationStart: CGPoint?
     @Published var draftAnnotationCurrent: CGPoint?
+    @Published var draftFreehandPoints: [CGPoint] = []
     @Published var recentPickedColors: [String] = []
     @Published var recentScreenshots: [RecentScreenshot] = []
     @Published var isColorPickerActive: Bool = false
+    @Published var isAnnotationCanvasColorPickerActive: Bool = false
+    @Published var annotationCanvasHoverColor: Color?
+    @Published var annotationCanvasHoverHex: String?
     @Published var liveHoverColorHex: String?
     @Published var canvasSize: CGSize = .zero
     var captureProcess: Process?

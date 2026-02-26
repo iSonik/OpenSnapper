@@ -45,6 +45,21 @@ struct ExportCanvasView: View {
                     .offset(x: editor.imageOffsetX, y: editor.imageOffsetY)
                     .clipShape(RoundedRectangle(cornerRadius: activeImageCornerRadius, style: .continuous))
                     .shadow(color: shadowColor, radius: editor.shadowRadius, y: shadowYOffset)
+
+                if !forExport {
+                    RoundedRectangle(cornerRadius: activeImageCornerRadius, style: .continuous)
+                        .stroke(
+                            Color.white.opacity(0.45),
+                            style: StrokeStyle(lineWidth: 1, dash: [5, 5])
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: activeImageCornerRadius, style: .continuous)
+                                .stroke(Color.black.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                                .blur(radius: 0.2)
+                        )
+                        .frame(width: fitted.width, height: fitted.height)
+                        .allowsHitTesting(false)
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -100,18 +115,40 @@ private struct CanvasAnnotationsOverlayView: View {
                 if
                     let start = editor.draftAnnotationStart,
                     let end = editor.draftAnnotationCurrent,
-                    (editor.annotationTool == .box || editor.annotationTool == .arrow)
+                    (editor.annotationTool == .box || editor.annotationTool == .arrow || editor.annotationTool == .lupe)
                 {
                     annotationView(
                         EditorState.Annotation(
                             id: UUID(),
-                            kind: editor.annotationTool == .arrow ? .arrow : .box,
+                            kind: editor.annotationTool == .arrow ? .arrow : (editor.annotationTool == .lupe ? .lupe : .box),
                             stylePreset: editor.annotationStylePreset,
                             start: start,
                             end: end,
                             text: nil,
-                            textBoxWidth: nil,
+                            textBoxWidth: editor.annotationTool == .lupe ? defaultLupeSourceRadiusNormalized(in: geometry.size) : nil,
                             textBoxHeight: nil
+                        ),
+                        in: geometry.size,
+                        isDraft: true
+                    )
+                }
+
+                if editor.annotationTool == .draw, editor.draftFreehandPoints.count >= 2 {
+                    let points = editor.draftFreehandPoints
+                    let first = points.first ?? .zero
+                    let last = points.last ?? first
+                    annotationView(
+                        EditorState.Annotation(
+                            id: UUID(),
+                            kind: .draw,
+                            stylePreset: editor.annotationStylePreset,
+                            start: first,
+                            end: last,
+                            text: nil,
+                            textBoxWidth: nil,
+                            textBoxHeight: nil,
+                            controlPoint: nil,
+                            points: points
                         ),
                         in: geometry.size,
                         isDraft: true
@@ -126,7 +163,11 @@ private struct CanvasAnnotationsOverlayView: View {
     private func annotationView(_ annotation: EditorState.Annotation, in canvasSize: CGSize, isDraft: Bool = false) -> some View {
         let style = AnnotationVisualStyle(
             preset: annotation.stylePreset,
-            customColor: editor.annotationCustomColor,
+            customColor: annotationCustomColor(for: annotation.id),
+            boxFillColor: annotationBoxFillColor(for: annotation.id),
+            boxFillOpacity: annotationBoxFillOpacity(for: annotation.id),
+            lineWidth: annotationStrokeWidth(for: annotation.id),
+            boxCornerRadius: annotationBoxCornerRadius(for: annotation.id),
             isDraft: isDraft
         )
         switch annotation.kind {
@@ -158,14 +199,26 @@ private struct CanvasAnnotationsOverlayView: View {
         case .arrow:
             let start = canvasPoint(annotation.start, in: canvasSize)
             let end = canvasPoint(annotation.end, in: canvasSize)
+            let bendHandle = arrowBendHandlePoint(for: annotation, in: canvasSize)
             ZStack {
-                CanvasArrowShape(
-                    start: start,
-                    end: end,
-                    headLength: style.arrowHeadLength,
-                    headAngle: .pi / 7
-                )
-                .stroke(style.stroke, style: StrokeStyle(lineWidth: style.lineWidth, lineCap: .round, lineJoin: .round))
+                if let control = annotation.controlPoint.map({ canvasPoint($0, in: canvasSize) }) {
+                    CurvedCanvasArrowShape(
+                        start: start,
+                        control: control,
+                        end: end,
+                        headLength: style.arrowHeadLength,
+                        headAngle: .pi / 7
+                    )
+                    .stroke(style.stroke, style: StrokeStyle(lineWidth: style.lineWidth, lineCap: .round, lineJoin: .round))
+                } else {
+                    CanvasArrowShape(
+                        start: start,
+                        end: end,
+                        headLength: style.arrowHeadLength,
+                        headAngle: .pi / 7
+                    )
+                    .stroke(style.stroke, style: StrokeStyle(lineWidth: style.lineWidth, lineCap: .round, lineJoin: .round))
+                }
 
                 if !forExport, editor.selectedAnnotationID == annotation.id {
                     Circle()
@@ -178,30 +231,131 @@ private struct CanvasAnnotationsOverlayView: View {
                         .frame(width: 10, height: 10)
                         .overlay(Circle().stroke(style.stroke, lineWidth: 2))
                         .position(x: end.x, y: end.y)
+
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().stroke(style.stroke, lineWidth: 2))
+                        .position(x: bendHandle.x, y: bendHandle.y)
+                }
+            }
+
+        case .draw:
+            let points = annotation.points.map { canvasPoint($0, in: canvasSize) }
+            if points.count >= 2 {
+                (drawAutoSmoothEnabled(for: annotation.id) ? smoothStrokePath(points) : polylineStrokePath(points))
+                    .stroke(style.stroke, style: StrokeStyle(lineWidth: style.lineWidth, lineCap: .round, lineJoin: .round))
+                    .overlay {
+                        if !forExport, editor.selectedAnnotationID == annotation.id {
+                            let center = drawMoveHandlePoint(for: points)
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 10, height: 10)
+                                .overlay(Circle().stroke(style.stroke, lineWidth: 2))
+                                .position(x: center.x, y: center.y)
+                        }
+                    }
+            }
+
+        case .lupe:
+            let source = canvasPoint(annotation.start, in: canvasSize)
+            let lens = canvasPoint(annotation.end, in: canvasSize)
+            let sourceRadius = lupeSourceRadius(for: annotation, in: canvasSize)
+            let lensRadius = lupeLensRadius(for: annotation, in: canvasSize)
+            let connector = lupeConnector(source: source, lens: lens, sourceRadius: sourceRadius, lensRadius: lensRadius)
+            let selected = !forExport && editor.selectedAnnotationID == annotation.id
+            let radiusHandlePoint = CGPoint(x: source.x + sourceRadius, y: source.y)
+
+            ZStack {
+                if let connector {
+                    Path { path in
+                        path.move(to: connector.start)
+                        path.addLine(to: connector.end)
+                    }
+                    .stroke(style.stroke, style: StrokeStyle(lineWidth: max(2, style.lineWidth - 0.5), lineCap: .round, lineJoin: .round))
+                }
+
+                lupeLensView(
+                    at: lens,
+                    sourcePoint: source,
+                    lensRadius: lensRadius,
+                    canvasSize: canvasSize,
+                    style: style
+                )
+
+                Circle()
+                    .fill(style.boxFill.opacity(0.25))
+                    .overlay(
+                        Circle()
+                            .stroke(style.stroke, lineWidth: max(2, style.lineWidth - 0.5))
+                    )
+                    .frame(width: sourceRadius * 2, height: sourceRadius * 2)
+                    .position(x: source.x, y: source.y)
+
+                if selected {
+                    Circle()
+                        .stroke(.white.opacity(0.9), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+                        .frame(width: sourceRadius * 2 + 6, height: sourceRadius * 2 + 6)
+                        .position(x: source.x, y: source.y)
+                    Circle()
+                        .stroke(.white.opacity(0.9), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+                        .frame(width: lensRadius * 2 + 6, height: lensRadius * 2 + 6)
+                        .position(x: lens.x, y: lens.y)
+
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().stroke(style.stroke, lineWidth: 2))
+                        .position(x: source.x, y: source.y)
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().stroke(style.stroke, lineWidth: 2))
+                        .position(x: lens.x, y: lens.y)
+
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            Circle()
+                                .stroke(style.stroke, lineWidth: 1.8)
+                        )
+                        .overlay(
+                            Image(systemName: "arrow.left.and.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(style.stroke)
+                        )
+                        .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                        .position(x: radiusHandlePoint.x, y: radiusHandlePoint.y)
                 }
             }
 
         case .text:
             let point = canvasPoint(annotation.start, in: canvasSize)
             let selected = !forExport && editor.selectedAnnotationID == annotation.id
+            let textFontSize = annotationTextFontSize(for: annotation.id, fallback: editor.annotationTextDefaultFontSize)
+            let textForeground = annotationTextForeground(for: annotation.id, fallback: editor.annotationTextDefaultFontColor)
+            let textBackground = annotationTextBackground(for: annotation.id, fallback: editor.annotationTextDefaultBackgroundColor)
+            let textAlignment = annotationTextAlignment(for: annotation.id)
             let contentWidth = textContentWidth(for: annotation, style: style, in: canvasSize)
             let contentHeight = textContentHeight(for: annotation, style: style, in: canvasSize)
             if !forExport, editor.editingTextAnnotationID == annotation.id {
                 InlineAnnotationTextEditor(
                     text: textBinding(for: annotation.id),
-                    fontSize: style.textFontSize,
-                    textColor: NSColor(style.textForeground),
+                    fontSize: textFontSize,
+                    textColor: NSColor(textForeground),
+                    alignment: textAlignment.nsTextAlignment,
                     preferredContentWidth: contentWidth,
                     preferredContentHeight: contentHeight,
                     onCommit: {
                         editor.finishEditingTextAnnotation()
                     }
                 )
-                    .frame(width: contentWidth, alignment: .center)
-                    .frame(height: contentHeight, alignment: .center)
+                    .frame(width: contentWidth, alignment: textAlignment.frameAlignment)
+                    .frame(height: contentHeight, alignment: textAlignment.frameAlignment)
                     .padding(.horizontal, style.textHorizontalPadding)
                     .padding(.vertical, style.textVerticalPadding)
-                    .background(style.textBackground, in: RoundedRectangle(cornerRadius: style.textCornerRadius, style: .continuous))
+                    .background(textBackground, in: RoundedRectangle(cornerRadius: style.textCornerRadius, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: style.textCornerRadius, style: .continuous)
                             .stroke(style.stroke, lineWidth: max(1, style.lineWidth * 0.7))
@@ -215,15 +369,15 @@ private struct CanvasAnnotationsOverlayView: View {
                     .position(x: point.x, y: point.y)
             } else {
                 Text(annotation.text ?? "Text")
-                    .font(.system(size: style.textFontSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(style.textForeground)
-                    .multilineTextAlignment(.center)
+                    .font(.system(size: textFontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(textForeground)
+                    .multilineTextAlignment(textAlignment.swiftUITextAlignment)
                     .lineLimit(nil)
-                    .frame(width: contentWidth, alignment: .center)
-                    .frame(minHeight: contentHeight, alignment: .center)
+                    .frame(width: contentWidth, alignment: textAlignment.frameAlignment)
+                    .frame(minHeight: contentHeight, alignment: textAlignment.frameAlignment)
                     .padding(.horizontal, style.textHorizontalPadding)
                     .padding(.vertical, style.textVerticalPadding)
-                    .background(style.textBackground, in: RoundedRectangle(cornerRadius: style.textCornerRadius, style: .continuous))
+                    .background(textBackground, in: RoundedRectangle(cornerRadius: style.textCornerRadius, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: style.textCornerRadius, style: .continuous)
                             .stroke(style.stroke.opacity(0.65), lineWidth: max(1, style.lineWidth * 0.5))
@@ -241,6 +395,170 @@ private struct CanvasAnnotationsOverlayView: View {
 
     private func canvasPoint(_ point: CGPoint, in size: CGSize) -> CGPoint {
         CGPoint(x: point.x * size.width, y: point.y * size.height)
+    }
+
+    private func arrowBendHandlePoint(for annotation: EditorState.Annotation, in canvasSize: CGSize) -> CGPoint {
+        let start = canvasPoint(annotation.start, in: canvasSize)
+        let end = canvasPoint(annotation.end, in: canvasSize)
+        guard let control = annotation.controlPoint else {
+            return CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+        }
+        let controlCanvas = canvasPoint(control, in: canvasSize)
+        return CGPoint(
+            x: ((start.x + end.x) * 0.25) + (controlCanvas.x * 0.5),
+            y: ((start.y + end.y) * 0.25) + (controlCanvas.y * 0.5)
+        )
+    }
+
+    private func annotationCustomColor(for id: UUID) -> Color {
+        editor.annotationColorOverrides[id] ?? editor.annotationCustomColor
+    }
+
+    private func annotationStrokeWidth(for id: UUID) -> CGFloat {
+        editor.annotationStrokeWidthOverrides[id] ?? editor.annotationStrokeWidth
+    }
+
+    private func annotationBoxFillColor(for id: UUID) -> Color {
+        editor.annotationBoxFillColorOverrides[id] ?? editor.annotationBoxFillColor
+    }
+
+    private func annotationBoxFillOpacity(for id: UUID) -> Double {
+        editor.annotationBoxFillOpacityOverrides[id] ?? editor.annotationBoxFillOpacity
+    }
+
+    private func annotationBoxCornerRadius(for id: UUID) -> CGFloat {
+        editor.annotationBoxCornerRadiusOverrides[id] ?? editor.annotationBoxCornerRadius
+    }
+
+    private func annotationTextForeground(for id: UUID, fallback: Color) -> Color {
+        editor.annotationTextFontColorOverrides[id] ?? fallback
+    }
+
+    private func annotationTextBackground(for id: UUID, fallback: Color) -> Color {
+        editor.annotationTextBackgroundColorOverrides[id] ?? fallback
+    }
+
+    private func annotationTextFontSize(for id: UUID, fallback: CGFloat) -> CGFloat {
+        editor.annotationTextFontSizeOverrides[id] ?? fallback
+    }
+
+    private func annotationTextAlignment(for id: UUID) -> EditorState.AnnotationTextAlignment {
+        editor.annotationTextAlignmentOverrides[id] ?? editor.annotationTextDefaultAlignment
+    }
+
+    private func drawAutoSmoothEnabled(for id: UUID) -> Bool {
+        editor.annotationDrawAutoSmoothOverrides[id] ?? editor.annotationDrawAutoSmooth
+    }
+
+    private func drawMoveHandlePoint(for points: [CGPoint]) -> CGPoint {
+        polylineMidpoint(points) ?? (points.first ?? .zero)
+    }
+
+    private func polylineMidpoint(_ points: [CGPoint]) -> CGPoint? {
+        guard let first = points.first else { return nil }
+        guard points.count >= 2 else { return first }
+
+        var lengths: [CGFloat] = []
+        lengths.reserveCapacity(points.count - 1)
+        var total: CGFloat = 0
+        for index in 1..<points.count {
+            let a = points[index - 1]
+            let b = points[index]
+            let length = hypot(b.x - a.x, b.y - a.y)
+            lengths.append(length)
+            total += length
+        }
+
+        guard total > 0.001 else { return points[points.count / 2] }
+        let target = total * 0.5
+        var traversed: CGFloat = 0
+
+        for index in 1..<points.count {
+            let length = lengths[index - 1]
+            let nextTraversed = traversed + length
+            if target <= nextTraversed, length > 0.001 {
+                let t = (target - traversed) / length
+                let a = points[index - 1]
+                let b = points[index]
+                return CGPoint(
+                    x: a.x + ((b.x - a.x) * t),
+                    y: a.y + ((b.y - a.y) * t)
+                )
+            }
+            traversed = nextTraversed
+        }
+
+        return points.last
+    }
+
+    private func polylineStrokePath(_ points: [CGPoint]) -> Path {
+        guard let first = points.first else { return Path() }
+        var path = Path()
+        path.move(to: first)
+        for point in points.dropFirst() {
+            path.addLine(to: point)
+        }
+        return path
+    }
+
+    private func smoothStrokePath(_ points: [CGPoint]) -> Path {
+        let smoothedPoints = averagedStrokePoints(points)
+        guard let first = smoothedPoints.first else { return Path() }
+        guard smoothedPoints.count > 1 else {
+            var path = Path()
+            path.addEllipse(in: CGRect(x: first.x - 1, y: first.y - 1, width: 2, height: 2))
+            return path
+        }
+
+        var path = Path()
+        path.move(to: first)
+
+        if smoothedPoints.count == 2 {
+            path.addLine(to: smoothedPoints[1])
+            return path
+        }
+
+        for index in 1..<(smoothedPoints.count - 1) {
+            let current = smoothedPoints[index]
+            let next = smoothedPoints[index + 1]
+            let midpoint = CGPoint(x: (current.x + next.x) / 2, y: (current.y + next.y) / 2)
+            path.addQuadCurve(to: midpoint, control: current)
+        }
+
+        if let last = smoothedPoints.last, let penultimate = smoothedPoints.dropLast().last {
+            path.addQuadCurve(to: last, control: penultimate)
+        }
+        return path
+    }
+
+    private func averagedStrokePoints(_ points: [CGPoint]) -> [CGPoint] {
+        guard points.count >= 4 else { return points }
+        var output = points
+        let passes = points.count >= 10 ? 3 : 2
+
+        for _ in 0..<passes {
+            let input = output
+            for index in 1..<(input.count - 1) {
+                let prev = input[index - 1]
+                let current = input[index]
+                let next = input[index + 1]
+
+                if index >= 2, index <= input.count - 3 {
+                    let prev2 = input[index - 2]
+                    let next2 = input[index + 2]
+                    output[index] = CGPoint(
+                        x: (prev2.x * 0.12) + (prev.x * 0.22) + (current.x * 0.32) + (next.x * 0.22) + (next2.x * 0.12),
+                        y: (prev2.y * 0.12) + (prev.y * 0.22) + (current.y * 0.32) + (next.y * 0.22) + (next2.y * 0.12)
+                    )
+                } else {
+                    output[index] = CGPoint(
+                        x: (prev.x * 0.3) + (current.x * 0.4) + (next.x * 0.3),
+                        y: (prev.y * 0.3) + (current.y * 0.4) + (next.y * 0.3)
+                    )
+                }
+            }
+        }
+        return output
     }
 
     private func normalizedRect(_ a: CGPoint, _ b: CGPoint, in size: CGSize) -> CGRect {
@@ -320,7 +638,8 @@ private struct CanvasAnnotationsOverlayView: View {
     private func textVisibleRect(for annotation: EditorState.Annotation, style: AnnotationVisualStyle, in canvasSize: CGSize) -> CGRect {
         let center = canvasPoint(annotation.start, in: canvasSize)
         let text = (annotation.text?.isEmpty == false ? annotation.text : "Text") ?? "Text"
-        let font = NSFont.systemFont(ofSize: style.textFontSize, weight: .semibold)
+        let resolvedFontSize = annotationTextFontSize(for: annotation.id, fallback: style.textFontSize)
+        let font = NSFont.systemFont(ofSize: resolvedFontSize, weight: .semibold)
 
         let bubbleWidth: CGFloat
         let measuredTextHeight: CGFloat
@@ -352,12 +671,156 @@ private struct CanvasAnnotationsOverlayView: View {
             height: bubbleHeight
         )
     }
+
+    private var lupeSourceRadiusNormalizedRange: ClosedRange<CGFloat> {
+        0.02...0.22
+    }
+
+    private func defaultLupeSourceRadiusNormalized(in canvasSize: CGSize) -> CGFloat {
+        let minDimension = max(min(canvasSize.width, canvasSize.height), 1)
+        let normalized = max(24 / minDimension, 0.05)
+        return min(lupeSourceRadiusNormalizedRange.upperBound, max(lupeSourceRadiusNormalizedRange.lowerBound, normalized))
+    }
+
+    private func lupeSourceRadius(for annotation: EditorState.Annotation, in canvasSize: CGSize) -> CGFloat {
+        let minDimension = max(min(canvasSize.width, canvasSize.height), 1)
+        let normalized = annotation.textBoxWidth ?? defaultLupeSourceRadiusNormalized(in: canvasSize)
+        let clamped = min(lupeSourceRadiusNormalizedRange.upperBound, max(lupeSourceRadiusNormalizedRange.lowerBound, normalized))
+        return clamped * minDimension
+    }
+
+    private func lupeLensRadius(for annotation: EditorState.Annotation, in canvasSize: CGSize) -> CGFloat {
+        max(44, lupeSourceRadius(for: annotation, in: canvasSize) * 1.7)
+    }
+
+    private var lupeMagnification: CGFloat { 2.2 }
+
+    private func lupeConnector(
+        source: CGPoint,
+        lens: CGPoint,
+        sourceRadius: CGFloat,
+        lensRadius: CGFloat
+    ) -> (start: CGPoint, end: CGPoint)? {
+        let dx = lens.x - source.x
+        let dy = lens.y - source.y
+        let length = hypot(dx, dy)
+        guard length > 0.001 else { return nil }
+        let ux = dx / length
+        let uy = dy / length
+        return (
+            start: CGPoint(x: source.x + ux * sourceRadius, y: source.y + uy * sourceRadius),
+            end: CGPoint(x: lens.x - ux * lensRadius, y: lens.y - uy * lensRadius)
+        )
+    }
+
+    @ViewBuilder
+    private func lupeLensView(
+        at lensCenter: CGPoint,
+        sourcePoint: CGPoint,
+        lensRadius: CGFloat,
+        canvasSize: CGSize,
+        style: AnnotationVisualStyle
+    ) -> some View {
+        let diameter = lensRadius * 2
+        let fill = Circle().fill(Color.black.opacity(forExport ? 0.12 : 0.22))
+
+        ZStack {
+            fill
+
+            if let image = editor.sourceImage,
+               let baseImageRect = lupeBaseImageRect(for: image, in: canvasSize)
+            {
+                lupeMagnifiedImage(
+                    image: image,
+                    sourcePoint: sourcePoint,
+                    baseImageRect: baseImageRect,
+                    lensRadius: lensRadius
+                )
+                .clipShape(Circle())
+            }
+
+            Circle()
+                .stroke(style.stroke, lineWidth: max(2, style.lineWidth - 0.5))
+        }
+        .frame(width: diameter, height: diameter)
+        .position(x: lensCenter.x, y: lensCenter.y)
+    }
+
+    private func lupeBaseImageRect(for image: NSImage, in canvasSize: CGSize) -> CGRect? {
+        let availableWidth = max(1, canvasSize.width - (editor.canvasPadding * 2))
+        let availableHeight = max(1, canvasSize.height - (editor.canvasPadding * 2))
+        let imageWidth = max(image.size.width, 1)
+        let imageHeight = max(image.size.height, 1)
+        let imageAspect = imageWidth / imageHeight
+        let containerAspect = availableWidth / availableHeight
+
+        let fitted: CGSize
+        if containerAspect > imageAspect {
+            fitted = CGSize(width: availableHeight * imageAspect, height: availableHeight)
+        } else {
+            fitted = CGSize(width: availableWidth, height: availableWidth / imageAspect)
+        }
+
+        let x = (canvasSize.width - fitted.width) / 2
+        let y = (canvasSize.height - fitted.height) / 2
+        return CGRect(x: x, y: y, width: fitted.width, height: fitted.height)
+    }
+
+    @ViewBuilder
+    private func lupeMagnifiedImage(
+        image: NSImage,
+        sourcePoint: CGPoint,
+        baseImageRect: CGRect,
+        lensRadius: CGFloat
+    ) -> some View {
+        let effectiveScale = max(editor.imageScale, 0.0001)
+        let transformedCenter = CGPoint(
+            x: baseImageRect.midX + editor.imageOffsetX,
+            y: baseImageRect.midY + editor.imageOffsetY
+        )
+        let sourceDelta = CGPoint(
+            x: sourcePoint.x - transformedCenter.x,
+            y: sourcePoint.y - transformedCenter.y
+        )
+        let pointInBaseCanvas = CGPoint(
+            x: baseImageRect.midX + (sourceDelta.x / effectiveScale),
+            y: baseImageRect.midY + (sourceDelta.y / effectiveScale)
+        )
+        let localPoint = CGPoint(
+            x: pointInBaseCanvas.x - baseImageRect.minX,
+            y: pointInBaseCanvas.y - baseImageRect.minY
+        )
+        let totalScale = effectiveScale * lupeMagnification
+        let origin = CGPoint(
+            x: lensRadius - (localPoint.x * totalScale),
+            y: lensRadius - (localPoint.y * totalScale)
+        )
+
+        ZStack(alignment: .topLeading) {
+            if forExport {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: baseImageRect.width, height: baseImageRect.height)
+                    .scaleEffect(totalScale, anchor: .topLeading)
+                    .offset(x: origin.x, y: origin.y)
+            } else {
+                StaticRasterImageView(image: image)
+                    .frame(width: baseImageRect.width, height: baseImageRect.height)
+                    .scaleEffect(totalScale, anchor: .topLeading)
+                    .offset(x: origin.x, y: origin.y)
+            }
+        }
+        .frame(width: lensRadius * 2, height: lensRadius * 2, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
 }
 
 private struct InlineAnnotationTextEditor: NSViewRepresentable {
     @Binding var text: String
     let fontSize: CGFloat
     let textColor: NSColor
+    let alignment: NSTextAlignment
     let preferredContentWidth: CGFloat?
     let preferredContentHeight: CGFloat?
     let onCommit: () -> Void
@@ -408,7 +871,7 @@ private struct InlineAnnotationTextEditor: NSViewRepresentable {
                 nsView.window?.makeFirstResponder(nsView)
                 context.coordinator.installOutsideClickMonitor(for: nsView)
                 if let editor = nsView.currentEditor() as? NSTextView {
-                    context.coordinator.applyCenteredEditingParagraphStyle(to: editor)
+                    context.coordinator.applyEditingParagraphStyle(to: editor, alignment: alignment)
                     editor.selectedRange = NSRange(location: nsView.stringValue.count, length: 0)
                 }
             }
@@ -420,7 +883,7 @@ private struct InlineAnnotationTextEditor: NSViewRepresentable {
     private func applyStyle(to field: NSTextField) {
         field.font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
         field.textColor = textColor
-        field.alignment = .center
+        field.alignment = alignment
     }
 
     @MainActor
@@ -444,7 +907,7 @@ private struct InlineAnnotationTextEditor: NSViewRepresentable {
         func controlTextDidBeginEditing(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
             if let editor = field.currentEditor() as? NSTextView {
-                applyCenteredEditingParagraphStyle(to: editor)
+                applyEditingParagraphStyle(to: editor, alignment: field.alignment)
             }
         }
 
@@ -463,9 +926,9 @@ private struct InlineAnnotationTextEditor: NSViewRepresentable {
             return false
         }
 
-        func applyCenteredEditingParagraphStyle(to textView: NSTextView) {
+        func applyEditingParagraphStyle(to textView: NSTextView, alignment: NSTextAlignment) {
             let style = NSMutableParagraphStyle()
-            style.alignment = .center
+            style.alignment = alignment
 
             let previousSelection = textView.selectedRange()
 
@@ -473,7 +936,7 @@ private struct InlineAnnotationTextEditor: NSViewRepresentable {
             let range = NSRange(location: 0, length: textView.string.utf16.count)
             if range.length > 0 {
                 textView.textStorage?.addAttribute(.paragraphStyle, value: style, range: range)
-                textView.setAlignment(.center, range: range)
+                textView.setAlignment(alignment, range: range)
             }
             textView.setSelectedRange(previousSelection)
         }
@@ -563,6 +1026,40 @@ private struct CanvasArrowShape: Shape {
     }
 }
 
+private struct CurvedCanvasArrowShape: Shape {
+    let start: CGPoint
+    let control: CGPoint
+    let end: CGPoint
+    let headLength: CGFloat
+    let headAngle: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: start)
+        path.addQuadCurve(to: end, control: control)
+
+        let tangent = CGPoint(x: end.x - control.x, y: end.y - control.y)
+        let length = max(hypot(tangent.x, tangent.y), 0.001)
+        guard length > 0.001 else { return path }
+
+        let angle = atan2(tangent.y, tangent.x)
+        let left = CGPoint(
+            x: end.x - cos(angle - headAngle) * headLength,
+            y: end.y - sin(angle - headAngle) * headLength
+        )
+        let right = CGPoint(
+            x: end.x - cos(angle + headAngle) * headLength,
+            y: end.y - sin(angle + headAngle) * headLength
+        )
+
+        path.move(to: end)
+        path.addLine(to: left)
+        path.move(to: end)
+        path.addLine(to: right)
+        return path
+    }
+}
+
 private struct AnnotationVisualStyle {
     let stroke: Color
     let boxFill: Color
@@ -576,7 +1073,15 @@ private struct AnnotationVisualStyle {
     let textHorizontalPadding: CGFloat
     let textVerticalPadding: CGFloat
 
-    init(preset: EditorState.AnnotationStylePreset, customColor: Color, isDraft: Bool) {
+    init(
+        preset: EditorState.AnnotationStylePreset,
+        customColor: Color,
+        boxFillColor: Color,
+        boxFillOpacity: Double,
+        lineWidth: CGFloat,
+        boxCornerRadius: CGFloat,
+        isDraft: Bool
+    ) {
         let alpha: Double = isDraft ? 0.65 : 1.0
 
         switch preset {
@@ -597,14 +1102,14 @@ private struct AnnotationVisualStyle {
             textBackground = Color(red: 0.55, green: 0.08, blue: 0.08).opacity(0.95 * alpha)
         case .custom:
             stroke = customColor.opacity(alpha)
-            boxFill = customColor.opacity(0.14 * alpha)
+            boxFill = boxFillColor.opacity(max(0, min(1, boxFillOpacity)) * alpha)
             textForeground = .white.opacity(alpha)
             textBackground = customColor.opacity(0.92 * alpha)
         }
 
-        lineWidth = 3
-        boxCornerRadius = 10
-        arrowHeadLength = 14
+        self.lineWidth = max(1, lineWidth)
+        self.boxCornerRadius = max(0, boxCornerRadius)
+        arrowHeadLength = max(10, self.lineWidth * 4.2)
         textFontSize = 16
         textCornerRadius = 9
         textHorizontalPadding = 10
