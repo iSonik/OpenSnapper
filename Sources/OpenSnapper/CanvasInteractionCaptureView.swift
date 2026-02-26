@@ -48,7 +48,7 @@ final class CanvasInteractionNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(self)

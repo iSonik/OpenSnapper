@@ -20,6 +20,8 @@ extension EditorState {
             return
         }
 
+        let hiddenWindows = temporarilyHideVisibleWindowsForColorPicker()
+        NSApp.setActivationPolicy(.accessory)
         NSApp.activate(ignoringOtherApps: true)
 
         let sampler = NSColorSampler()
@@ -30,6 +32,7 @@ extension EditorState {
             Task { @MainActor in
                 guard let self else { return }
                 defer {
+                    self.restoreWindowsAfterColorPicker(hiddenWindows)
                     self.activeColorSampler = nil
                     self.stopHoverColorTracking()
                     self.isColorPickerActive = false
@@ -44,6 +47,27 @@ extension EditorState {
                 let hex = Self.hexString(from: sRGBColor)
                 self.copyColorHexToClipboard(hex)
             }
+        }
+    }
+
+    private typealias HiddenColorPickerWindow = (window: NSWindow, alpha: CGFloat, ignoresMouseEvents: Bool)
+
+    private func temporarilyHideVisibleWindowsForColorPicker() -> [HiddenColorPickerWindow] {
+        var hiddenWindows: [HiddenColorPickerWindow] = []
+        for window in NSApp.windows where window.isVisible {
+            hiddenWindows.append((window, window.alphaValue, window.ignoresMouseEvents))
+            window.alphaValue = 0
+            window.ignoresMouseEvents = true
+            window.orderOut(nil)
+        }
+        return hiddenWindows
+    }
+
+    private func restoreWindowsAfterColorPicker(_ hiddenWindows: [HiddenColorPickerWindow]) {
+        for hiddenWindow in hiddenWindows {
+            hiddenWindow.window.alphaValue = hiddenWindow.alpha
+            hiddenWindow.window.ignoresMouseEvents = hiddenWindow.ignoresMouseEvents
+            hiddenWindow.window.orderFrontRegardless()
         }
     }
 

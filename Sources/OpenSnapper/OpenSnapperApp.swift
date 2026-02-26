@@ -29,6 +29,15 @@ struct OpenSnapperApp: App {
             }
 
             CommandGroup(replacing: .saveItem) {
+                Button("Close") {
+                    if let keyWindow = NSApp.keyWindow {
+                        keyWindow.performClose(nil)
+                    } else {
+                        editor.hideToMenuBar()
+                    }
+                }
+                .keyboardShortcut("w", modifiers: .command)
+
                 Button(AppStrings.Controls.save) {
                     editor.exportPNG()
                 }
